@@ -1,0 +1,47 @@
+# Gradle files
+.gradle/
+build/
+*/build/
+
+# Local configuration file (sdk path, etc)
+local.properties
+
+# Log Files
+*.log
+
+# Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+
+# NDK
+.cxx/
+.externalNativeBuild/
+
+# Keystore files
+*.jks
+*.keystore
+
+# Build files
+outputs/
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+
+# Test reports
+/app/build/reports/
+
+# Google Services (if applicable)
+google-services.json
+
+# Cache
+.kotlin/
+.artifacts/

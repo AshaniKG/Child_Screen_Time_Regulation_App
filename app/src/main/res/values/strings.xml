@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Soft-Landing Digital Wellness</string>
+    <string name="accessibility_service_description">Soft-Landing system service that provides progressive visual and sensory degradation to enable smooth screen-time transition and child disengagement.</string>
+</resources>
