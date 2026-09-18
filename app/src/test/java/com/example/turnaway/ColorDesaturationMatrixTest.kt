@@ -11,10 +11,10 @@ class ColorDesaturationMatrixTest {
         val lb = 0.0722f
 
         return floatArrayOf(
-            lr + (1 - lr) * s, lg * (1 - s),       lb * (1 - s),       0f, 0f,
-            lr * (1 - s),       lg + (1 - lg) * s, lb * (1 - s),       0f, 0f,
-            lr * (1 - s),       lg * (1 - s),       lb + (1 - lb) * s, 0f, 0f,
-            0f,                 0f,                 0f,                 1f, 0f
+            (lr + (1 - lr) * s) * s, (lg * (1 - s)) * s,       (lb * (1 - s)) * s,       0f, 0f,
+            (lr * (1 - s)) * s,       (lg + (1 - lg) * s) * s, (lb * (1 - s)) * s,       0f, 0f,
+            (lr * (1 - s)) * s,       (lg * (1 - s)) * s,       (lb + (1 - lb) * s) * s, 0f, 0f,
+            0f,                      0f,                      0f,                      1f, 0f
         )
     }
 
@@ -29,22 +29,22 @@ class ColorDesaturationMatrixTest {
     }
 
     @Test
-    fun testFullyDesaturatedMatrixUsesLuminanceWeights() {
+    fun testFullyDesaturatedMatrixScalesToBlack() {
         val matrix = computeColorMatrix(0.0f)
 
-        // Row 1 (Red output)
-        assertEquals(0.2126f, matrix[0], 0.001f)
-        assertEquals(0.7152f, matrix[1], 0.001f)
-        assertEquals(0.0722f, matrix[2], 0.001f)
+        // Row 1 (Red output scales to 0 - pure black)
+        assertEquals(0.0f, matrix[0], 0.001f)
+        assertEquals(0.0f, matrix[1], 0.001f)
+        assertEquals(0.0f, matrix[2], 0.001f)
 
-        // Row 2 (Green output)
-        assertEquals(0.2126f, matrix[5], 0.001f)
-        assertEquals(0.7152f, matrix[6], 0.001f)
-        assertEquals(0.0722f, matrix[7], 0.001f)
+        // Row 2 (Green output scales to 0 - pure black)
+        assertEquals(0.0f, matrix[5], 0.001f)
+        assertEquals(0.0f, matrix[6], 0.001f)
+        assertEquals(0.0f, matrix[7], 0.001f)
 
-        // Row 3 (Blue output)
-        assertEquals(0.2126f, matrix[10], 0.001f)
-        assertEquals(0.7152f, matrix[11], 0.001f)
-        assertEquals(0.0722f, matrix[12], 0.001f)
+        // Row 3 (Blue output scales to 0 - pure black)
+        assertEquals(0.0f, matrix[10], 0.001f)
+        assertEquals(0.0f, matrix[11], 0.001f)
+        assertEquals(0.0f, matrix[12], 0.001f)
     }
 }

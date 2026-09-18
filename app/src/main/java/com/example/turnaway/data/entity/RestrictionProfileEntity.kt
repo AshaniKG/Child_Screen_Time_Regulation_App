@@ -11,6 +11,7 @@ data class RestrictionProfileEntity(
     val transitionDurationMinutes: Int = 2,
     val curveType: String = "LINEAR", // LINEAR, EXPONENTIAL, SIGMOIDAL
     val enableColorDesaturation: Boolean = true,
+    val maxBlurRadius: Int = 10,
     val enableFrameThrottling: Boolean = true,
     val enableTouchDelay: Boolean = true,
     val minFpsFloor: Int = 5,

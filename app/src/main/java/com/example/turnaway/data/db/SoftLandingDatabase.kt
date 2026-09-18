@@ -8,14 +8,16 @@ import com.example.turnaway.data.dao.SoftLandingDao
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
+import com.example.turnaway.data.entity.TargetAppEntity
 
 @Database(
     entities = [
         RestrictionProfileEntity::class,
         ScheduleConfigEntity::class,
-        SessionLogEntity::class
+        SessionLogEntity::class,
+        TargetAppEntity::class
     ],
-    version = 3,
+    version = 5,
     exportSchema = false
 )
 abstract class SoftLandingDatabase : RoomDatabase() {

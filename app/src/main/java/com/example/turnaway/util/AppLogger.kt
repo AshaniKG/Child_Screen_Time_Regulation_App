@@ -26,27 +26,33 @@ object AppLogger {
     val logs: StateFlow<List<LogEntry>> = _logs.asStateFlow()
 
     fun i(tag: String, message: String, details: String? = null) {
+        android.util.Log.i(tag, if (details != null) "$message | $details" else message)
         addLog(LogLevel.INFO, tag, message, details)
     }
 
     fun w(tag: String, message: String, details: String? = null) {
+        android.util.Log.w(tag, if (details != null) "$message | $details" else message)
         addLog(LogLevel.WARN, tag, message, details)
     }
 
     fun e(tag: String, message: String, details: String? = null) {
+        android.util.Log.e(tag, if (details != null) "$message | $details" else message)
         addLog(LogLevel.ERROR, tag, message, details)
     }
 
     fun e(tag: String, message: String, throwable: Throwable) {
+        android.util.Log.e(tag, message, throwable)
         addLog(LogLevel.ERROR, tag, message, throwable.stackTraceToString())
     }
 
     fun e(tag: String, message: String, details: String?, throwable: Throwable?) {
         val extraDetails = details ?: throwable?.stackTraceToString()
+        android.util.Log.e(tag, if (extraDetails != null) "$message | $extraDetails" else message, throwable)
         addLog(LogLevel.ERROR, tag, message, extraDetails)
     }
 
     fun d(tag: String, message: String, details: String? = null) {
+        android.util.Log.d(tag, if (details != null) "$message | $details" else message)
         addLog(LogLevel.DEBUG, tag, message, details)
     }
 

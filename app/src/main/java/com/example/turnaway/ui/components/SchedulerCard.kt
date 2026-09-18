@@ -1,5 +1,6 @@
 package com.example.turnaway.ui.components
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,11 +28,18 @@ fun SchedulerCard(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(20.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // ── Header ──────────────────────────────────────────────
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -44,98 +52,107 @@ fun SchedulerCard(
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(26.dp)
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Column {
-                        Text(text = "Time-Block Scheduler", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        Text(text = "Automated Soft-Landing time windows", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "Bedtime Schedule",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Set recurring wind-down times",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
                 IconButton(onClick = { showDialog = true }) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "Add Schedule", tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = "Add Schedule",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (schedules.isEmpty()) {
-                Text(
-                    text = "No active restriction schedules. Tap + to add automated time blocks (e.g. 20:00 to 20:30 bedtime).",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            } else {
-                schedules.forEach { schedule ->
-                    Surface(
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(imageVector = Icons.Default.Schedule, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = "${schedule.startTimeOfDay} - ${schedule.endTimeOfDay}",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    fontWeight = FontWeight.SemiBold
-                                )
+            // ── Schedule list ───────────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .animateContentSize(),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (schedules.isEmpty()) {
+                    Text(
+                        text = "No schedules set yet. Tap + to add a recurring bedtime wind-down.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    schedules.forEach { schedule ->
+                        ScheduleRow(
+                            schedule = schedule,
+                            onToggle = { active ->
+                                onAddSchedule(schedule.copy(isActive = active))
                             }
-                            Switch(
-                                checked = schedule.isActive,
-                                onCheckedChange = { active ->
-                                    onAddSchedule(schedule.copy(isActive = active))
-                                }
-                            )
-                        }
+                        )
                     }
                 }
             }
         }
     }
 
+    // ── Add Bedtime Rule dialog ─────────────────────────────────────
     if (showDialog) {
         AlertDialog(
             onDismissRequest = { showDialog = false },
-            title = { Text("Add Restriction Time Block") },
+            shape = RoundedCornerShape(20.dp),
+            title = {
+                Text(
+                    text = "Add Bedtime Rule",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
             text = {
-                Column {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     OutlinedTextField(
                         value = startTime,
                         onValueChange = { startTime = it },
                         label = { Text("Start Time (HH:mm)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(
                         value = endTime,
                         onValueChange = { endTime = it },
                         label = { Text("End Time (HH:mm)") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
-                Button(onClick = {
-                    onAddSchedule(
-                        ScheduleConfigEntity(
-                            profileId = "default",
-                            startTimeOfDay = startTime,
-                            endTimeOfDay = endTime,
-                            daysOfWeekBitmask = 127,
-                            isActive = true
+                Button(
+                    onClick = {
+                        onAddSchedule(
+                            ScheduleConfigEntity(
+                                profileId = "default",
+                                startTimeOfDay = startTime,
+                                endTimeOfDay = endTime,
+                                daysOfWeekBitmask = 127, // Mon–Sun
+                                isActive = true
+                            )
                         )
-                    )
-                    showDialog = false
-                }) {
+                        showDialog = false
+                    }
+                ) {
                     Text("Save Schedule")
                 }
             },
@@ -145,5 +162,49 @@ fun SchedulerCard(
                 }
             }
         )
+    }
+}
+
+/**
+ * A single schedule row rendered as a [Surface] chip showing the time range
+ * and an on/off [Switch].
+ */
+@Composable
+private fun ScheduleRow(
+    schedule: ScheduleConfigEntity,
+    onToggle: (Boolean) -> Unit
+) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(14.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    text = "${schedule.startTimeOfDay} – ${schedule.endTimeOfDay}",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+            Switch(
+                checked = schedule.isActive,
+                onCheckedChange = onToggle
+            )
+        }
     }
 }

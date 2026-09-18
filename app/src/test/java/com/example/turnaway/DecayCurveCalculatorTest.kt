@@ -58,8 +58,8 @@ class DecayCurveCalculatorTest {
         val fpsMid = DecayCurveCalculator.calculateTargetFps(0.5f, 5, DecayCurveType.LINEAR)
         val fpsEnd = DecayCurveCalculator.calculateTargetFps(1.0f, 5, DecayCurveType.LINEAR)
 
-        assertEquals(60, fpsStart)
-        assertEquals(32, fpsMid)
+        assertEquals(25, fpsStart)
+        assertEquals(15, fpsMid)
         assertEquals(5, fpsEnd)
     }
 
@@ -69,8 +69,22 @@ class DecayCurveCalculatorTest {
         val delayMid = DecayCurveCalculator.calculateTouchDelayMs(0.5f, 800L, DecayCurveType.LINEAR)
         val delayEnd = DecayCurveCalculator.calculateTouchDelayMs(1.0f, 800L, DecayCurveType.LINEAR)
 
-        assertEquals(0L, delayStart)
-        assertEquals(400L, delayMid)
+        assertEquals(150L, delayStart)
+        assertEquals(475L, delayMid)
         assertEquals(800L, delayEnd)
+    }
+
+    @Test
+    fun testBlurRadiusCalculation() {
+        val blurStart = DecayCurveCalculator.calculateBlurRadius(0.0f, 10, DecayCurveType.LINEAR)
+        val blurMid = DecayCurveCalculator.calculateBlurRadius(0.5f, 10, DecayCurveType.LINEAR)
+        val blurEnd = DecayCurveCalculator.calculateBlurRadius(1.0f, 10, DecayCurveType.LINEAR)
+
+        assertEquals(0, blurStart)
+        assertEquals(5, blurMid)
+        assertEquals(10, blurEnd)
+
+        // Also test with default maxBlurRadius = 10
+        assertEquals(10, DecayCurveCalculator.calculateBlurRadius(1.0f, type = DecayCurveType.LINEAR))
     }
 }

@@ -1,14 +1,15 @@
 package com.example.turnaway.ui.components
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.TouchApp
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.outlined.ColorLens
+import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.TouchApp
+import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,177 +19,291 @@ import androidx.compose.ui.unit.dp
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.engine.DecayCurveType
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ProfileConfigurationCard(
     profile: RestrictionProfileEntity,
     onProfileUpdated: (RestrictionProfileEntity) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Unbound remember so sliders move smoothly without flickering on recomposition
-    var transitionMinutes by remember { mutableFloatStateOf(profile.transitionDurationMinutes.toFloat()) }
-    var enableGrayscale by remember { mutableStateOf(profile.enableColorDesaturation) }
-    var enableTouchDelay by remember { mutableStateOf(profile.enableTouchDelay) }
-    var maxTouchDelayMs by remember { mutableFloatStateOf(profile.maxTouchDelayMs.toFloat()) }
-    var curveType by remember { mutableStateOf(profile.curveType) }
+    var transitionDuration by remember { mutableFloatStateOf(profile.transitionDurationMinutes.toFloat()) }
+    var enableDimming by remember { mutableStateOf(profile.enableColorDesaturation) }
+    var blurIntensity by remember { mutableFloatStateOf(profile.maxBlurRadius.toFloat()) }
+    var enableFrameThrottling by remember { mutableStateOf(profile.enableFrameThrottling) }
+    var minFpsFloor by remember { mutableFloatStateOf(profile.minFpsFloor.toFloat()) }
+    var enableTouchSlowdown by remember { mutableStateOf(profile.enableTouchDelay) }
+    var touchDelayMs by remember { mutableFloatStateOf(profile.maxTouchDelayMs.toFloat()) }
+    var enableAudioFade by remember { mutableStateOf(profile.enableAudioFade) }
+    var curveTypeStr by remember { mutableStateOf(profile.curveType) }
 
-    // Sync with external profile updates only when ID changes
     LaunchedEffect(profile.id) {
-        transitionMinutes = profile.transitionDurationMinutes.toFloat()
-        enableGrayscale = profile.enableColorDesaturation
-        enableTouchDelay = profile.enableTouchDelay
-        maxTouchDelayMs = profile.maxTouchDelayMs.toFloat()
-        curveType = profile.curveType
+        transitionDuration = profile.transitionDurationMinutes.toFloat()
+        enableDimming = profile.enableColorDesaturation
+        blurIntensity = profile.maxBlurRadius.toFloat()
+        enableFrameThrottling = profile.enableFrameThrottling
+        minFpsFloor = profile.minFpsFloor.toFloat()
+        enableTouchSlowdown = profile.enableTouchDelay
+        touchDelayMs = profile.maxTouchDelayMs.toFloat()
+        enableAudioFade = profile.enableAudioFade
+        curveTypeStr = profile.curveType
     }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        shape = RoundedCornerShape(24.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
                 .padding(20.dp)
+                .animateContentSize(),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             // Header
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
                 Icon(
                     imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(26.dp)
+                    contentDescription = "Settings",
+                    tint = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "Restriction Profile Parameters",
+                        text = "Wind-Down Settings",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "Configure sensory transition curves & thresholds",
+                        text = "Customize how the screen gradually winds down",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            HorizontalDivider()
 
-            // 1. Transition Duration Slider
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(imageVector = Icons.Default.Timer, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(text = "Transition Window: ", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                Text(text = "${transitionMinutes.toInt()} min", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-            }
-            Slider(
-                value = transitionMinutes,
-                onValueChange = { transitionMinutes = it },
-                valueRange = 1f..60f,
-                steps = 59
-            )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 2. Grayscale Desaturation Toggle
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(imageVector = Icons.Default.Palette, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "1. Color Desaturation Filter", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Fade screen colors to grayscale", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = enableGrayscale, onCheckedChange = { enableGrayscale = it })
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 4. Touch Input Latency Queue Toggle & Max Lag Slider
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(imageVector = Icons.Default.TouchApp, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "2. Touch Latency Queue", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Maximum lag floor: ${maxTouchDelayMs.toInt()} ms", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-                Switch(checked = enableTouchDelay, onCheckedChange = { enableTouchDelay = it })
-            }
-            if (enableTouchDelay) {
+            // Wind-Down Duration
+            Column {
+                Text(
+                    text = "Wind-Down Duration: ${transitionDuration.toInt()} min",
+                    style = MaterialTheme.typography.labelLarge
+                )
                 Slider(
-                    value = maxTouchDelayMs,
-                    onValueChange = { maxTouchDelayMs = it },
-                    valueRange = 100f..800f,
-                    steps = 7
+                    value = transitionDuration,
+                    onValueChange = { transitionDuration = it },
+                    valueRange = 1f..60f,
+                    steps = 58
                 )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 4. Dynamic Audio Volume Fading Toggle
-            var enableAudioFade by remember { mutableStateOf(profile.enableAudioFade) }
-            LaunchedEffect(profile.id) {
-                enableAudioFade = profile.enableAudioFade
+            // Screen Dimming
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.ColorLens,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Screen Dimming", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Gradually fade colors and blur the screen", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(
+                        checked = enableDimming,
+                        onCheckedChange = { enableDimming = it }
+                    )
+                }
+                AnimatedVisibility(visible = enableDimming) {
+                    Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
+                        Text(
+                            text = "Screen Softening",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        val blurLabel = when {
+                            blurIntensity <= 3f -> "Low"
+                            blurIntensity <= 7f -> "Medium"
+                            else -> "High"
+                        }
+                        Text(
+                            text = blurLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Slider(
+                            value = blurIntensity,
+                            onValueChange = { blurIntensity = it },
+                            valueRange = 1f..10f,
+                            steps = 2
+                        )
+                    }
+                }
             }
 
+            // Screen Stutter & Frame Slowdown
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Speed,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Screen Stutter & Frame Slowdown", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Gradually drops visual framerate to discourage gaming", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(
+                        checked = enableFrameThrottling,
+                        onCheckedChange = { enableFrameThrottling = it }
+                    )
+                }
+                AnimatedVisibility(visible = enableFrameThrottling) {
+                    Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
+                        Text(
+                            text = "Framerate Floor",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        val fpsLabel = when {
+                            minFpsFloor <= 8f -> "Heavy Stutter (5-8 FPS)"
+                            minFpsFloor <= 15f -> "Moderate Lag (10-15 FPS)"
+                            else -> "Mild Jitter (20-30 FPS)"
+                        }
+                        Text(
+                            text = fpsLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Slider(
+                            value = minFpsFloor,
+                            onValueChange = { minFpsFloor = it },
+                            valueRange = 5f..30f,
+                            steps = 4
+                        )
+                    }
+                }
+            }
+
+            // Gentle Touch Slowdown
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.TouchApp,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Gentle Touch Slowdown", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Slowly reduce touch responsiveness", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(
+                        checked = enableTouchSlowdown,
+                        onCheckedChange = { enableTouchSlowdown = it }
+                    )
+                }
+                AnimatedVisibility(visible = enableTouchSlowdown) {
+                    Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
+                        Text(
+                            text = "Slowdown Intensity",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        val touchLabel = when {
+                            touchDelayMs < 300 -> "Light"
+                            touchDelayMs < 600 -> "Moderate"
+                            else -> "Strong"
+                        }
+                        Text(
+                            text = touchLabel,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Slider(
+                            value = touchDelayMs,
+                            onValueChange = { touchDelayMs = it },
+                            valueRange = 100f..800f,
+                            steps = 6
+                        )
+                    }
+                }
+            }
+
+            // Volume Fade-Out
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Icon(imageVector = Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.primary)
-                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Outlined.VolumeOff,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 12.dp)
+                )
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "3. Dynamic Audio Fading", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                    Text(text = "Fades volume & locks hardware keys", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = "Volume Fade-Out", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(text = "Gradually lower media volume", style = MaterialTheme.typography.bodySmall)
                 }
-                Switch(checked = enableAudioFade, onCheckedChange = { enableAudioFade = it })
+                Switch(
+                    checked = enableAudioFade,
+                    onCheckedChange = { enableAudioFade = it }
+                )
             }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 5. Decay Curve Type Selection
-            Text(text = "Decay Curve Model", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DecayCurveType.values().forEach { curve ->
-                    FilterChip(
-                        selected = curveType == curve.name,
-                        onClick = { curveType = curve.name },
-                        label = { Text(curve.name) }
-                    )
+            
+            // Wind-Down Style
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Wind-Down Style",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                val options = listOf("Steady" to "LINEAR", "Gradual" to "EXPONENTIAL", "Smooth" to "SIGMOIDAL")
+                val selectedIndex = options.indexOfFirst { it.second == curveTypeStr }.takeIf { it >= 0 } ?: 0
+                
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    options.forEachIndexed { index, (label, value) ->
+                        SegmentedButton(
+                            selected = index == selectedIndex,
+                            onClick = { curveTypeStr = value },
+                            shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size)
+                        ) {
+                            Text(label)
+                        }
+                    }
                 }
             }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
+            
             // Save Button
-            Button(
+            FilledTonalButton(
                 onClick = {
                     val updated = profile.copy(
-                        transitionDurationMinutes = transitionMinutes.toInt(),
-                        enableColorDesaturation = enableGrayscale,
-                        enableTouchDelay = enableTouchDelay,
-                        maxTouchDelayMs = maxTouchDelayMs.toLong(),
-                        enableAudioFade = enableAudioFade,
-                        curveType = curveType
+                        transitionDurationMinutes = transitionDuration.toInt(),
+                        curveType = curveTypeStr,
+                        enableColorDesaturation = enableDimming,
+                        maxBlurRadius = blurIntensity.toInt(),
+                        enableFrameThrottling = enableFrameThrottling,
+                        minFpsFloor = minFpsFloor.toInt(),
+                        enableTouchDelay = enableTouchSlowdown,
+                        maxTouchDelayMs = touchDelayMs.toLong(),
+                        enableAudioFade = enableAudioFade
                     )
                     onProfileUpdated(updated)
                 },
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) {
-                Icon(imageVector = Icons.Default.Save, contentDescription = null)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Save Profile Settings", fontWeight = FontWeight.Bold)
+                Text("Save Settings")
             }
         }
     }

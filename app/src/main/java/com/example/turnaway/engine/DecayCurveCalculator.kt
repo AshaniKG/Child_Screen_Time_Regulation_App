@@ -31,19 +31,33 @@ object DecayCurveCalculator {
     }
 
     /**
-     * Calculates target FPS floor between 60 FPS down to minFpsFloor
+     * Calculates target FPS floor between 25 FPS down to minFpsFloor (5-15 FPS)
+     * Starting at 25 FPS ensures that frame stutter pacing is active immediately during wind-down.
      */
     fun calculateTargetFps(progress: Float, minFpsFloor: Int, type: DecayCurveType): Int {
         val decay = calculateDecay(progress, type)
-        val target = 60 - ((60 - minFpsFloor.coerceIn(5, 60)) * decay)
-        return target.toInt().coerceIn(minFpsFloor, 60)
+        val effectiveMin = minFpsFloor.coerceIn(5, 25)
+        val target = 25 - ((25 - effectiveMin) * decay)
+        return target.toInt().coerceIn(effectiveMin, 25)
     }
 
     /**
-     * Calculates touch latency delay L(t) in [0, maxTouchDelayMs]
+     * Calculates touch latency delay L(t) with a noticeable starting base (150ms)
+     * so touch sluggishness and lag are immediately felt upon starting wind-down.
      */
     fun calculateTouchDelayMs(progress: Float, maxTouchDelayMs: Long, type: DecayCurveType): Long {
         val decay = calculateDecay(progress, type)
-        return (maxTouchDelayMs * decay).toLong().coerceIn(0L, maxTouchDelayMs)
+        val baseDelay = 150L.coerceAtMost(maxTouchDelayMs / 2)
+        val remaining = maxTouchDelayMs - baseDelay
+        val delay = baseDelay + (remaining * decay).toLong()
+        return delay.coerceIn(0L, maxTouchDelayMs)
+    }
+
+    /**
+     * Calculates blur radius in pixels in [0, maxBlurRadius] (max default: 10px Gaussian blur)
+     */
+    fun calculateBlurRadius(progress: Float, maxBlurRadius: Int = 10, type: DecayCurveType): Int {
+        val decay = calculateDecay(progress, type)
+        return (maxBlurRadius * decay).toInt().coerceIn(0, maxBlurRadius)
     }
 }

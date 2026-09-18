@@ -46,18 +46,20 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         AppLogger.i(TAG, "Soft-Landing Accessibility Service connected successfully")
 
         try {
-            // 1. Configure Accessibility Capabilities
-            val info = AccessibilityServiceInfo().apply {
-                eventTypes = AccessibilityEvent.TYPE_TOUCH_INTERACTION_START or
-                        AccessibilityEvent.TYPE_TOUCH_INTERACTION_END
-                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-                flags = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
-                        AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            }
-            this.serviceInfo = info
+            // 1. Preserve XML configuration and capabilities (canTakeScreenshot, canPerformGestures, etc.)
+            val currentInfo = serviceInfo ?: AccessibilityServiceInfo()
+            currentInfo.eventTypes = currentInfo.eventTypes or
+                    AccessibilityEvent.TYPE_TOUCH_INTERACTION_START or
+                    AccessibilityEvent.TYPE_TOUCH_INTERACTION_END or
+                    AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            currentInfo.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+            currentInfo.flags = currentInfo.flags or
+                    AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS or
+                    AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            this.serviceInfo = currentInfo
 
-            // 2. Elevate Service to High-Priority Foreground Execution
-            startForegroundServiceWithNotification()
+            // 2. Post Persistent Status Notification
+            showMonitoringNotification()
 
             // 3. Initialize Overlay Layer Canvas & Engine Controllers
             initializeOverlayCanvas()
@@ -69,7 +71,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun startForegroundServiceWithNotification() {
+    private fun showMonitoringNotification() {
         try {
             val channelId = "soft_landing_engine_channel"
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -91,10 +93,10 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 .setOngoing(true)
                 .build()
 
-            startForeground(1001, notification)
-            AppLogger.d(TAG, "Started foreground notification channel")
+            manager.notify(1001, notification)
+            AppLogger.d(TAG, "Posted monitoring notification")
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to start foreground service notification", e)
+            AppLogger.e(TAG, "Failed to post service notification", e)
         }
     }
 
@@ -109,18 +111,15 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
-                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
             )
 
-            val ENABLE_OVERLAY_FEATURES = false // Disabled per user request
+            overlayManager.addView(overlayView, layoutParams)
 
-            if (ENABLE_OVERLAY_FEATURES) {
-                overlayManager.addView(overlayView, layoutParams)
-            }
-
-            desaturationController = ColorDesaturationController(this, overlayView)
-            frameThrottlingController = FrameThrottlingController(overlayView)
+            desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
+            frameThrottlingController = FrameThrottlingController(this, overlayView, overlayManager)
             touchDelayQueueManager = TouchDelayQueueManager(this)
             
             var gesturePath = android.graphics.Path()
@@ -139,7 +138,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             gesturePath.lineTo(event.rawX, event.rawY)
                         }
                         android.view.MotionEvent.ACTION_UP -> {
-                            gesturePath.lineTo(event.rawX, event.rawY)
+                            gesturePath.lineTo(event.rawX, event.rawY + 0.5f)
                             val duration = System.currentTimeMillis() - gestureStartTime
                             
                             isDispatchingGesture = true
@@ -166,8 +165,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     }
 
     private fun updateOverlayTouchableState(shouldIntercept: Boolean) {
-        val ENABLE_OVERLAY_FEATURES = false
-        if (!ENABLE_OVERLAY_FEATURES) return
         if (!::overlayView.isInitialized || !::overlayManager.isInitialized) return
         try {
             val lp = overlayView.layoutParams as WindowManager.LayoutParams
@@ -187,24 +184,55 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         }
     }
 
+    private var currentForegroundPackage: String? = null
+    private var targetedPackages: Set<String> = emptySet()
+
+    private fun evaluateAppTargeting() {
+        if (!::frameThrottlingController.isInitialized) return
+        val currentPkg = currentForegroundPackage
+        val isExcluded = currentPkg == null ||
+                currentPkg == packageName ||
+                currentPkg == "com.android.systemui" ||
+                currentPkg == "com.android.settings" ||
+                currentPkg.contains("launcher")
+
+        val isTargeted = !isExcluded && targetedPackages.contains(currentPkg)
+        AppLogger.d(TAG, "evaluateAppTargeting: pkg=$currentPkg, isTargeted=$isTargeted, targetedCount=${targetedPackages.size}")
+        frameThrottlingController.setTargetAppForeground(isTargeted)
+    }
+
     private fun observeBridgeAndDatabase() {
         serviceScope.launch {
             try {
                 val database = SoftLandingDatabase.getDatabase(applicationContext)
                 val dao = database.softLandingDao()
 
-                val defaultProfile = dao.getAllProfiles().firstOrNull()?.firstOrNull()
-                if (defaultProfile != null) {
-                    activeProfile = defaultProfile
-                } else {
-                    dao.insertProfile(activeProfile)
-                    AppLogger.i(TAG, "Inserted default Soft-Landing profile into Room database")
+                launch {
+                    dao.getAllProfiles().collect { profiles ->
+                        val p = profiles.firstOrNull()
+                        if (p != null) {
+                            activeProfile = p
+                            AppLogger.i(TAG, "Active profile synced from database: ${p.profileName}, duration: ${p.transitionDurationMinutes}m")
+                        } else {
+                            dao.insertProfile(activeProfile)
+                            AppLogger.i(TAG, "Inserted default Soft-Landing profile into Room database")
+                        }
+                    }
+                }
+
+                launch {
+                    dao.getTargetedApps().collect { apps ->
+                        targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
+                        AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps for selective regulation")
+                        evaluateAppTargeting()
+                    }
                 }
 
                 launch {
                     EngineBridge.manualTriggerEvent.collect { timestamp ->
                         if (timestamp != null) {
-                            AppLogger.i(TAG, "Manual Soft-Landing transition triggered")
+                            AppLogger.i(TAG, "Manual Soft-Landing transition triggered (timestamp=$timestamp)")
+                            evaluateAppTargeting()
                             startTransitionWindow(activeProfile)
                         }
                     }
@@ -228,112 +256,112 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private fun startTransitionWindow(profile: RestrictionProfileEntity) {
         transitionJob?.cancel()
         transitionJob = serviceScope.launch {
-            val durationMs = profile.transitionDurationMinutes * 60 * 1000L
-            val startTime = System.currentTimeMillis()
-            val curveType = try {
-                DecayCurveType.valueOf(profile.curveType)
-            } catch (e: Exception) {
-                DecayCurveType.LINEAR
-            }
-
-            AppLogger.i(TAG, "Transition window started. Duration: ${profile.transitionDurationMinutes}m, Curve: ${profile.curveType}")
-
-            EngineBridge.updateStatus(
-                EngineStatusData(
-                    state = EngineState.SOFT_LANDING_TRANSITION,
-                    timeRemainingMs = durationMs,
-                    currentSaturation = 1.0f,
-                    currentFps = 60,
-                    currentTouchDelayMs = 0L,
-                    currentVolumePercent = 1.0f,
-                    activeProfile = profile
-                )
-            )
-
-            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            val startVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-
-            var elapsedMs = 0L
-            while (elapsedMs < durationMs && isActive) {
-                val progress = elapsedMs.toFloat() / durationMs.toFloat()
-
-                val saturation = if (profile.enableColorDesaturation) {
-                    DecayCurveCalculator.calculateSaturation(progress, curveType)
-                } else 1.0f
-
-                val targetFps = if (profile.enableFrameThrottling) {
-                    DecayCurveCalculator.calculateTargetFps(progress, profile.minFpsFloor, curveType)
-                } else 60
-
-                val touchDelayMs = if (profile.enableTouchDelay) {
-                    DecayCurveCalculator.calculateTouchDelayMs(progress, profile.maxTouchDelayMs, curveType)
-                } else 0L
-
-                if (profile.enableAudioFade) {
-                    val targetVolume = (startVolume * (1.0f - progress)).toInt()
-                    audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVolume, 0)
+            try {
+                val durationMinutes = profile.transitionDurationMinutes.coerceAtLeast(1)
+                val durationMs = durationMinutes * 60 * 1000L
+                val startTime = System.currentTimeMillis()
+                val curveType = try {
+                    DecayCurveType.valueOf(profile.curveType)
+                } catch (e: Exception) {
+                    DecayCurveType.LINEAR
                 }
 
-                desaturationController.updateSaturation(saturation)
-                frameThrottlingController.setTargetFps(targetFps)
-                touchDelayQueueManager.setTouchDelay(touchDelayMs)
+                AppLogger.i(TAG, "Transition window started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}, MinFps: ${profile.minFpsFloor}")
 
-                withContext(Dispatchers.Main) {
-                    updateOverlayTouchableState(touchDelayMs > 0L)
-                }
-
-                val remainingMs = durationMs - elapsedMs
                 EngineBridge.updateStatus(
                     EngineStatusData(
                         state = EngineState.SOFT_LANDING_TRANSITION,
-                        timeRemainingMs = remainingMs,
-                        currentSaturation = saturation,
-                        currentFps = targetFps,
-                        currentTouchDelayMs = touchDelayMs,
-                        currentVolumePercent = if (profile.enableAudioFade) (1.0f - progress).coerceIn(0f, 1f) else 1.0f,
+                        timeRemainingMs = durationMs,
+                        currentSaturation = 1.0f,
+                        currentBlurRadius = 0,
+                        currentFps = 60,
+                        currentTouchDelayMs = 0L,
+                        currentVolumePercent = 1.0f,
                         activeProfile = profile
                     )
                 )
 
-                delay(500)
-                elapsedMs = System.currentTimeMillis() - startTime
-            }
+                var elapsedMs = 0L
+                while (elapsedMs < durationMs && isActive) {
+                    val progress = elapsedMs.toFloat() / durationMs.toFloat()
 
-            if (isActive) {
-                AppLogger.w(TAG, "Soft-Landing transition reached complete lockout phase")
-                desaturationController.updateSaturation(0.0f)
-                frameThrottlingController.setTargetFps(profile.minFpsFloor)
-                touchDelayQueueManager.setTouchDelay(profile.maxTouchDelayMs)
+                    // Screen dimming removed per instructions: keep saturation at 1.0f and blur at 0
+                    val saturation = 1.0f
+                    val blurRadius = 0
 
-                withContext(Dispatchers.Main) {
-                    updateOverlayTouchableState(profile.maxTouchDelayMs > 0L)
+                    // Pure Screen FPS Lag focus
+                    val targetFps = if (profile.enableFrameThrottling) {
+                        DecayCurveCalculator.calculateTargetFps(progress, profile.minFpsFloor, curveType)
+                    } else 60
+
+                    // Touch delay & audio fade disabled for now per user focus on screen FPS lag
+                    desaturationController.updateSaturationAndBlur(1.0f, 0)
+                    frameThrottlingController.setTargetFps(targetFps)
+                    touchDelayQueueManager.setTouchDelay(0L)
+
+                    withContext(Dispatchers.Main) {
+                        updateOverlayTouchableState(false)
+                    }
+
+                    val remainingMs = durationMs - elapsedMs
+                    EngineBridge.updateStatus(
+                        EngineStatusData(
+                            state = EngineState.SOFT_LANDING_TRANSITION,
+                            timeRemainingMs = remainingMs,
+                            currentSaturation = saturation,
+                            currentBlurRadius = blurRadius,
+                            currentFps = targetFps,
+                            currentTouchDelayMs = 0L,
+                            currentVolumePercent = 1.0f,
+                            activeProfile = profile
+                        )
+                    )
+
+                    delay(500)
+                    elapsedMs = System.currentTimeMillis() - startTime
                 }
 
-                EngineBridge.updateStatus(
-                    EngineStatusData(
-                        state = EngineState.LOCKED_OUT,
-                        timeRemainingMs = 0L,
-                        currentSaturation = 0.0f,
-                        currentFps = profile.minFpsFloor,
-                        currentTouchDelayMs = profile.maxTouchDelayMs,
-                        currentVolumePercent = if (profile.enableAudioFade) 0.0f else 1.0f,
-                        activeProfile = profile
-                    )
-                )
+                if (isActive) {
+                    AppLogger.w(TAG, "Soft-Landing transition reached complete lockout phase (Lag remains active)")
+                    desaturationController.updateSaturationAndBlur(1.0f, 0)
+                    frameThrottlingController.setTargetFps(profile.minFpsFloor)
+                    touchDelayQueueManager.setTouchDelay(0L)
 
-                saveSessionMetrics(
-                    timestampStart = startTime,
-                    durationActiveMs = durationMs,
-                    timeToDisengageMs = durationMs,
-                    wasAborted = false
-                )
+                    withContext(Dispatchers.Main) {
+                        updateOverlayTouchableState(false)
+                    }
+
+                    EngineBridge.updateStatus(
+                        EngineStatusData(
+                            state = EngineState.LOCKED_OUT,
+                            timeRemainingMs = 0L,
+                            currentSaturation = 1.0f,
+                            currentBlurRadius = 0,
+                            currentFps = profile.minFpsFloor,
+                            currentTouchDelayMs = 0L,
+                            currentVolumePercent = 1.0f,
+                            activeProfile = profile
+                        )
+                    )
+
+                    saveSessionMetrics(
+                        timestampStart = startTime,
+                        durationActiveMs = durationMs,
+                        timeToDisengageMs = durationMs,
+                        wasAborted = false
+                    )
+
+                    // Retain maximum lag throttling without locking device screen so Stop button remains available
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error in transition window coroutine", e)
             }
         }
     }
 
     private fun abortTransition() {
         transitionJob?.cancel()
-        desaturationController.updateSaturation(1.0f)
+        desaturationController.updateSaturationAndBlur(1.0f, 0)
         frameThrottlingController.stopThrottling()
         touchDelayQueueManager.setTouchDelay(0L)
         updateOverlayTouchableState(false)
@@ -343,6 +371,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 state = EngineState.MONITORING,
                 timeRemainingMs = 0L,
                 currentSaturation = 1.0f,
+                currentBlurRadius = 0,
                 currentFps = 60,
                 currentTouchDelayMs = 0L,
                 currentVolumePercent = 1.0f,
@@ -389,7 +418,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // Accessibility gesture interception hook
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (!pkg.isNullOrBlank() && pkg != "android" && pkg != "com.android.systemui") {
+                if (currentForegroundPackage != pkg) {
+                    currentForegroundPackage = pkg
+                    AppLogger.d(TAG, "Active foreground window changed: $pkg")
+                    evaluateAppTargeting()
+                }
+            }
+        }
     }
 
     override fun onInterrupt() {
@@ -399,8 +437,10 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         AppLogger.i(TAG, "Accessibility Service destroyed")
-        val ENABLE_OVERLAY_FEATURES = false
-        if (ENABLE_OVERLAY_FEATURES && ::overlayView.isInitialized) {
+        if (::frameThrottlingController.isInitialized) {
+            frameThrottlingController.release()
+        }
+        if (::overlayView.isInitialized) {
             try {
                 overlayManager.removeView(overlayView)
             } catch (e: Exception) {

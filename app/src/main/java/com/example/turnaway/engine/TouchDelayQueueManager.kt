@@ -29,7 +29,8 @@ class TouchDelayQueueManager(private val service: AccessibilityService) {
             return
         }
 
-        val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+        val effectiveDuration = durationMs.coerceIn(50L, 500L)
+        val stroke = GestureDescription.StrokeDescription(path, 0, effectiveDuration)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
 
         AppLogger.d(TAG, "Queuing gesture touch for ${currentDelayMs}ms delay...")
@@ -60,7 +61,7 @@ class TouchDelayQueueManager(private val service: AccessibilityService) {
 
     private fun dispatchPathDirectly(path: Path, durationMs: Long) {
         try {
-            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs)
+            val stroke = GestureDescription.StrokeDescription(path, 0, durationMs.coerceIn(50L, 500L))
             val gesture = GestureDescription.Builder().addStroke(stroke).build()
             service.dispatchGesture(gesture, null, null)
         } catch (e: Exception) {

@@ -7,57 +7,49 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
+import com.example.turnaway.data.entity.SessionLogEntity
+import com.example.turnaway.data.entity.TargetAppEntity
 import com.example.turnaway.data.repository.SoftLandingRepository
 import com.example.turnaway.service.EngineBridge
 import com.example.turnaway.service.EngineStatusData
 import com.example.turnaway.ui.state.DashboardUiState
 import com.example.turnaway.util.AppLogger
-import com.example.turnaway.util.LogEntry
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 class DashboardViewModel(private val repository: SoftLandingRepository) : ViewModel() {
 
     private val _isAuthenticated = MutableStateFlow(false)
-    private val _hasAdbPermission = MutableStateFlow(false)
     private val _hasOverlayPermission = MutableStateFlow(false)
     private val _hasAccessibilityPermission = MutableStateFlow(false)
-    private val _isTestGrayscaleActive = MutableStateFlow(false)
-
-    private val permissionsFlow = combine(
-        _hasAdbPermission,
-        _hasOverlayPermission,
-        _hasAccessibilityPermission,
-        _isTestGrayscaleActive
-    ) { adb, overlay, acc, testGray ->
-        PermissionsTuple(adb, overlay, acc, testGray)
-    }
 
     val uiState: StateFlow<DashboardUiState> = combine(
         _isAuthenticated,
         combine(
-            repository.getAllProfiles().map { it.firstOrNull() ?: RestrictionProfileEntity(profileName = "Standard Soft-Landing") },
+            repository.getAllProfiles().map { it.firstOrNull() ?: RestrictionProfileEntity(profileName = "Standard") },
             repository.getAllSchedules(),
+            repository.getAllTargetApps(),
             repository.getRecentSessionLogs()
-        ) { profile, schedules, logs -> DataTuple(profile, schedules, logs) },
-        combine(EngineBridge.engineStatus, AppLogger.logs, permissionsFlow) { status, logs, perms -> EngineLogsPermissionsTuple(status, logs, perms) }
-    ) { auth, dataTuple, engineLogsPerms ->
+        ) { profile, schedules, targetApps, logs -> DataTuple(profile, schedules, targetApps, logs) },
+        combine(EngineBridge.engineStatus, _hasOverlayPermission, _hasAccessibilityPermission) { status, overlay, acc ->
+            EnginePermissionsTuple(status, overlay, acc)
+        }
+    ) { auth, dataTuple, enginePerms ->
         DashboardUiState(
             isAuthenticated = auth,
             activeProfile = dataTuple.profile,
             activeSchedules = dataTuple.schedules,
-            currentEngineState = engineLogsPerms.status.state,
-            timeRemainingInPhaseMs = engineLogsPerms.status.timeRemainingMs,
-            currentSaturation = engineLogsPerms.status.currentSaturation,
-            currentFps = engineLogsPerms.status.currentFps,
-            currentTouchDelayMs = engineLogsPerms.status.currentTouchDelayMs,
-            currentVolumePercent = engineLogsPerms.status.currentVolumePercent,
+            targetApps = dataTuple.targetApps,
+            currentEngineState = enginePerms.status.state,
+            timeRemainingInPhaseMs = enginePerms.status.timeRemainingMs,
+            currentSaturation = enginePerms.status.currentSaturation,
+            currentBlurRadius = enginePerms.status.currentBlurRadius,
+            currentTouchDelayMs = enginePerms.status.currentTouchDelayMs,
+            currentVolumePercent = enginePerms.status.currentVolumePercent,
             recentSessionLogs = dataTuple.sessionLogs,
-            logEntries = engineLogsPerms.logs,
-            hasAdbPermission = engineLogsPerms.permissions.hasAdb,
-            hasOverlayPermission = engineLogsPerms.permissions.hasOverlay,
-            hasAccessibilityPermission = engineLogsPerms.permissions.hasAccessibility,
-            isTestGrayscaleActive = engineLogsPerms.permissions.isTestGrayscaleActive
+            hasOverlayPermission = enginePerms.hasOverlay,
+            hasAccessibilityPermission = enginePerms.hasAccessibility
         )
     }.stateIn(
         scope = viewModelScope,
@@ -66,13 +58,105 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
     )
 
     fun checkPermissions(context: Context) {
-        val hasOverlay = true // Settings.canDrawOverlays(context) // DISABLED FOR NOW
-        val hasAdb = context.checkCallingOrSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED
+        val hasOverlay = Settings.canDrawOverlays(context)
         val hasAccessibility = isAccessibilityServiceEnabled(context)
 
         _hasOverlayPermission.value = hasOverlay
-        _hasAdbPermission.value = hasAdb
         _hasAccessibilityPermission.value = hasAccessibility
+
+        scanAndSyncInstalledApps(context)
+    }
+
+    fun scanAndSyncInstalledApps(context: Context) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pm = context.packageManager
+                val currentApps = repository.getAllTargetApps().firstOrNull() ?: emptyList()
+                val currentMap = currentApps.associateBy { it.packageName }
+
+                val excludedPackages = setOf(
+                    context.packageName,
+                    "com.android.settings",
+                    "com.android.systemui",
+                    "android"
+                )
+
+                // 1. Discover all apps with Launcher activities
+                val launcherIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                    addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+                }
+                val launcherActivities = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    pm.queryIntentActivities(launcherIntent, PackageManager.ResolveInfoFlags.of(0L))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(launcherIntent, 0)
+                }
+
+                val discoveredMap = mutableMapOf<String, String>() // packageName -> appName
+
+                for (resolveInfo in launcherActivities) {
+                    val pkg = resolveInfo.activityInfo.packageName
+                    if (!excludedPackages.contains(pkg) && !pkg.contains("launcher", ignoreCase = true)) {
+                        val name = resolveInfo.loadLabel(pm).toString()
+                        discoveredMap[pkg] = name
+                    }
+                }
+
+                // 2. Discover user-installed apps (non-system apps) that may launch via other intents
+                val installedApps = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                    pm.getInstalledApplications(PackageManager.ApplicationInfoFlags.of(0L))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.getInstalledApplications(0)
+                }
+
+                for (appInfo in installedApps) {
+                    val pkg = appInfo.packageName
+                    if (!excludedPackages.contains(pkg) && !discoveredMap.containsKey(pkg)) {
+                        val isUserApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0
+                        val isUpdatedSysApp = (appInfo.flags and android.content.pm.ApplicationInfo.FLAG_UPDATED_SYSTEM_APP) != 0
+                        val hasLaunchIntent = pm.getLaunchIntentForPackage(pkg) != null
+
+                        if ((isUserApp || isUpdatedSysApp) && hasLaunchIntent) {
+                            val name = pm.getApplicationLabel(appInfo).toString()
+                            discoveredMap[pkg] = name
+                        }
+                    }
+                }
+
+                val targetEntities = discoveredMap.map { (pkg, name) ->
+                    val isTargeted = currentMap[pkg]?.isTargeted
+                        ?: (pkg.contains("youtube", ignoreCase = true) ||
+                            pkg.contains("video", ignoreCase = true) ||
+                            pkg.contains("chrome", ignoreCase = true) ||
+                            pkg.contains("game", ignoreCase = true) ||
+                            pkg.contains("media", ignoreCase = true) ||
+                            pkg.contains("tiktok", ignoreCase = true))
+                    TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted)
+                }.sortedBy { it.appName.lowercase() }
+
+                if (targetEntities.isNotEmpty()) {
+                    repository.saveTargetApps(targetEntities)
+                    AppLogger.d("TargetApps", "Synced ${targetEntities.size} installed apps into Room database")
+                }
+            } catch (e: Exception) {
+                AppLogger.e("TargetApps", "Error syncing installed apps", e)
+            }
+        }
+    }
+
+    fun toggleAppTarget(packageName: String, isTargeted: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAppTargetStatus(packageName, isTargeted)
+            AppLogger.i("TargetApps", "Updated target status: $packageName -> $isTargeted")
+        }
+    }
+
+    fun setAllAppsTargeted(isTargeted: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAllTargetStatus(isTargeted)
+            AppLogger.i("TargetApps", "Updated all apps target status: $isTargeted")
+        }
     }
 
     private fun isAccessibilityServiceEnabled(context: Context): Boolean {
@@ -107,52 +191,24 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
     fun triggerImmediateSoftLanding() {
         EngineBridge.triggerManualSoftLanding()
-        AppLogger.i("Engine", "Parent manually triggered Soft-Landing transition window")
+        AppLogger.i("Engine", "Parent manually triggered wind-down")
     }
 
     fun abortCurrentTransition() {
         EngineBridge.abortTransition()
-        AppLogger.w("Engine", "Parent aborted current Soft-Landing transition")
-    }
-
-    fun clearLogs() {
-        AppLogger.clear()
-    }
-
-    fun toggleTestGrayscale(context: Context) {
-        val newState = !_isTestGrayscaleActive.value
-        _isTestGrayscaleActive.value = newState
-        val hasAdb = _hasAdbPermission.value
-
-        if (hasAdb) {
-            try {
-                Settings.Secure.putInt(context.contentResolver, "accessibility_display_daltonizer_enabled", if (newState) 1 else 0)
-                Settings.Secure.putInt(context.contentResolver, "accessibility_display_daltonizer", 0)
-                AppLogger.i("TestGrayscale", "Toggled ADB system grayscale test: $newState")
-            } catch (e: Exception) {
-                AppLogger.e("TestGrayscale", "Error toggling native ADB grayscale test", e)
-            }
-        } else {
-            AppLogger.w("TestGrayscale", "Toggled on-device canvas grayscale filter test: $newState")
-        }
+        AppLogger.w("Engine", "Parent stopped current wind-down")
     }
 }
-
-private data class PermissionsTuple(
-    val hasAdb: Boolean,
-    val hasOverlay: Boolean,
-    val hasAccessibility: Boolean,
-    val isTestGrayscaleActive: Boolean
-)
 
 private data class DataTuple(
     val profile: RestrictionProfileEntity,
     val schedules: List<ScheduleConfigEntity>,
-    val sessionLogs: List<com.example.turnaway.data.entity.SessionLogEntity>
+    val targetApps: List<TargetAppEntity>,
+    val sessionLogs: List<SessionLogEntity>
 )
 
-private data class EngineLogsPermissionsTuple(
+private data class EnginePermissionsTuple(
     val status: EngineStatusData,
-    val logs: List<LogEntry>,
-    val permissions: PermissionsTuple
+    val hasOverlay: Boolean,
+    val hasAccessibility: Boolean
 )

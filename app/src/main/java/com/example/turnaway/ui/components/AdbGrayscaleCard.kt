@@ -70,7 +70,7 @@ fun AdbGrayscaleCard(
                 Spacer(modifier = Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "1. System-Wide Grayscale Engine",
+                        text = "1. System-Wide Black-Scale Engine",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
@@ -124,7 +124,7 @@ fun AdbGrayscaleCard(
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "The app includes a 100% on-device Hardware Canvas Overlay filter. " +
-                                "It desaturates screen colors to grayscale automatically when the transition window starts, without requiring any computer or ADB commands.",
+                                "It desaturates screen colors to black scale automatically when the transition window starts, without requiring any computer or ADB commands.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -222,7 +222,7 @@ fun AdbGrayscaleCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = if (isTestGrayscaleActive) "Restore Full Color" else "Test Grayscale Desaturation Filter"
+                    text = if (isTestGrayscaleActive) "Restore Full Color" else "Test Black-Scale Desaturation Filter"
                 )
             }
         }
