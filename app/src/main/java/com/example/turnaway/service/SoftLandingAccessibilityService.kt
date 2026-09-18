@@ -66,8 +66,35 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
             // 4. Listen to EngineBridge events & DB profiles
             observeBridgeAndDatabase()
+
+            // 5. Register debug trigger receiver for adb testing
+            val triggerFilter = android.content.IntentFilter().apply {
+                addAction("com.example.turnaway.ACTION_START_WINDDOWN")
+                addAction("com.example.turnaway.ACTION_STOP_WINDDOWN")
+            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                this,
+                debugBroadcastReceiver,
+                triggerFilter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
         } catch (e: Exception) {
             AppLogger.e(TAG, "Fatal error during accessibility service initialization", e)
+        }
+    }
+
+    private val debugBroadcastReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+            when (intent?.action) {
+                "com.example.turnaway.ACTION_START_WINDDOWN" -> {
+                    AppLogger.i(TAG, "Received ACTION_START_WINDDOWN via broadcast")
+                    EngineBridge.triggerManualSoftLanding()
+                }
+                "com.example.turnaway.ACTION_STOP_WINDDOWN" -> {
+                    AppLogger.i(TAG, "Received ACTION_STOP_WINDDOWN via broadcast")
+                    EngineBridge.abortTransition()
+                }
+            }
         }
     }
 
@@ -223,7 +250,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 launch {
                     dao.getTargetedApps().collect { apps ->
                         targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
-                        AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps for selective regulation")
+                        AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps: $targetedPackages")
                         evaluateAppTargeting()
                     }
                 }
@@ -420,10 +447,21 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
+            val className = event.className?.toString()
+            val isTarget = targetedPackages.contains(pkg)
+            AppLogger.d(TAG, "TYPE_WINDOW_STATE_CHANGED event: pkg=$pkg, class=$className, inTargetSet=$isTarget")
+
+            // CRITICAL FIX: Ignore TurnAway's own overlay windows so we do not deactivate targeting
+            // when our own overlay is added or rendered on top of the target app!
+            if (pkg == packageName && className != "com.example.turnaway.MainActivity") {
+                AppLogger.d(TAG, "Ignoring TurnAway overlay window event: class=$className")
+                return
+            }
+
             if (!pkg.isNullOrBlank() && pkg != "android" && pkg != "com.android.systemui") {
                 if (currentForegroundPackage != pkg) {
                     currentForegroundPackage = pkg
-                    AppLogger.d(TAG, "Active foreground window changed: $pkg")
+                    AppLogger.i(TAG, "Foreground package changed to: $pkg (inTargetSet=$isTarget)")
                     evaluateAppTargeting()
                 }
             }
@@ -447,6 +485,9 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 AppLogger.e(TAG, "Error removing overlay view", e)
             }
         }
+        try {
+            unregisterReceiver(debugBroadcastReceiver)
+        } catch (e: Exception) {}
         serviceScope.cancel()
     }
 }

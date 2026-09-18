@@ -37,10 +37,13 @@ class FrameThrottlingController(
             isThrottlingEnabled.set(false)
             removeOverlay()
             throttleJob?.cancel()
+            throttleJob = null
             AppLogger.d(TAG, "Frame throttling disengaged at 60 FPS normal rendering")
         } else {
             isThrottlingEnabled.set(true)
-            startThrottlingLoop()
+            if (isTargetAppForeground.get() && (throttleJob == null || throttleJob?.isActive == false)) {
+                startThrottlingLoop()
+            }
             AppLogger.d(TAG, "Target FPS updated to: $clampedFps FPS (Interval: ${1000L / clampedFps}ms)")
         }
     }
@@ -48,16 +51,19 @@ class FrameThrottlingController(
     fun setTargetAppForeground(isForeground: Boolean) {
         if (isTargetAppForeground.getAndSet(isForeground) != isForeground) {
             AppLogger.i(TAG, "Target application in foreground: $isForeground (Lag active: ${isThrottlingEnabled.get() && isForeground})")
-            if (isThrottlingEnabled.get()) {
-                if (isForeground) {
+            if (isForeground) {
+                if (isThrottlingEnabled.get() && (throttleJob == null || throttleJob?.isActive == false)) {
                     startThrottlingLoop()
-                } else {
-                    removeOverlay()
-                    throttleJob?.cancel()
                 }
+            } else {
+                removeOverlay()
+                throttleJob?.cancel()
+                throttleJob = null
             }
         }
     }
+
+    private var lastScreenshotRequestTime = 0L
 
     private fun startThrottlingLoop() {
         if (!isTargetAppForeground.get() || !isThrottlingEnabled.get()) return
@@ -66,25 +72,36 @@ class FrameThrottlingController(
         throttleJob = controllerScope.launch {
             ensureOverlayAdded()
 
+            var iteration = 0L
             while (isActive && isTargetAppForeground.get() && isThrottlingEnabled.get()) {
+                iteration++
                 val isMpActive = ScreenCaptureForegroundService.isProjectionActive.value
                 val currentFps = if (isMpActive) targetFps else 1 // Fallback to 1 FPS freeze if MP is revoked
                 val framePeriodMs = (1000L / currentFps.coerceAtLeast(1)).toLong()
                 val startTime = System.currentTimeMillis()
 
+                AppLogger.d(TAG, "Loop iteration #$iteration | isMpActive=$isMpActive | currentFps=$currentFps | period=${framePeriodMs}ms")
+
                 if (isMpActive) {
                     // 1. High-Performance MediaProjection Frame Pipeline
                     val captureService = ScreenCaptureForegroundService.instance
+                    if (captureService == null) {
+                        AppLogger.w(TAG, "ScreenCaptureForegroundService.instance is null despite isMpActive=true")
+                    }
                     val frameBitmap = captureService?.acquireLatestFrame()
 
                     if (frameBitmap != null && !frameBitmap.isRecycled) {
-                        jankOverlay?.updateFrame(frameBitmap)
-                        jankOverlay?.visibility = View.VISIBLE
+                        AppLogger.d(TAG, "MediaProjection frame acquired: ${frameBitmap.width}x${frameBitmap.height}")
+                        jankOverlay?.updateFrame(frameBitmap, "MediaProjection", currentFps)
+                    } else {
+                        AppLogger.w(TAG, "MediaProjection acquireLatestFrame() returned NULL")
+                        jankOverlay?.setDebugInfo("MediaProjection (Frame Null)", currentFps)
                     }
                 } else {
                     // 2. Resilient Fallback: takeScreenshot() at 1 FPS Freeze Mode
-                    AppLogger.w(TAG, "MediaProjection inactive or revoked; using takeScreenshot 1 FPS fallback")
-                    takeScreenshotFallback()
+                    AppLogger.w(TAG, "MediaProjection inactive; falling back to AccessibilityService.takeScreenshot() (1 FPS)")
+                    jankOverlay?.setDebugInfo("takeScreenshot fallback", currentFps)
+                    takeScreenshotFallback(currentFps)
                 }
 
                 val elapsedMs = System.currentTimeMillis() - startTime
@@ -96,8 +113,16 @@ class FrameThrottlingController(
         }
     }
 
-    private suspend fun takeScreenshotFallback() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+    private suspend fun takeScreenshotFallback(fps: Int) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            AppLogger.e(TAG, "takeScreenshot requires Android 11 (API 30)+. Current: ${Build.VERSION.SDK_INT}")
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val elapsedSinceLast = now - lastScreenshotRequestTime
+        lastScreenshotRequestTime = now
+        AppLogger.d(TAG, "Requesting takeScreenshot(). Elapsed since last call: ${elapsedSinceLast}ms")
 
         suspendCancellableCoroutine<Unit> { cont ->
             try {
@@ -106,25 +131,37 @@ class FrameThrottlingController(
                         try {
                             val hwBuffer = screenshot.hardwareBuffer
                             val colorSpace = screenshot.colorSpace
+                            val duration = System.currentTimeMillis() - now
+                            AppLogger.i(TAG, "takeScreenshot SUCCESS in ${duration}ms! Buffer: ${hwBuffer.width}x${hwBuffer.height}, format=${hwBuffer.format}")
+
                             val bitmap = Bitmap.wrapHardwareBuffer(hwBuffer, colorSpace)
-                            bitmap?.let {
-                                jankOverlay?.updateFrame(it)
-                                jankOverlay?.visibility = View.VISIBLE
+                            if (bitmap != null) {
+                                jankOverlay?.updateFrame(bitmap, "takeScreenshot (API 30)", fps)
+                            } else {
+                                AppLogger.e(TAG, "Bitmap.wrapHardwareBuffer returned NULL from hardware buffer")
                             }
                         } catch (e: Exception) {
-                            AppLogger.e(TAG, "Fallback screenshot conversion error", e)
+                            AppLogger.e(TAG, "Fallback screenshot conversion error: ${e.message}", e)
                         } finally {
                             if (cont.isActive) cont.resume(Unit, null)
                         }
                     }
 
                     override fun onFailure(errorCode: Int) {
-                        AppLogger.w(TAG, "Fallback screenshot failed (code=$errorCode)")
+                        val errorName = when (errorCode) {
+                            1 -> "ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR (1)"
+                            2 -> "ERROR_TAKE_SCREENSHOT_NO_ACCESSIBILITY_ACCESS (2)"
+                            3 -> "ERROR_TAKE_SCREENSHOT_INTERVAL_TIME_SHORT (3)"
+                            4 -> "ERROR_TAKE_SCREENSHOT_INVALID_DISPLAY (4)"
+                            5 -> "ERROR_TAKE_SCREENSHOT_INVALID_WINDOW (5)"
+                            else -> "UNKNOWN_ERROR ($errorCode)"
+                        }
+                        AppLogger.e(TAG, "takeScreenshot FAILED! Error code: $errorName")
                         if (cont.isActive) cont.resume(Unit, null)
                     }
                 })
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error invoking takeScreenshot fallback", e)
+                AppLogger.e(TAG, "Exception during takeScreenshot() invocation", e)
                 if (cont.isActive) cont.resume(Unit, null)
             }
         }
@@ -133,8 +170,11 @@ class FrameThrottlingController(
     private fun ensureOverlayAdded() {
         if (jankOverlay == null) {
             try {
+                // Confirm context is AccessibilityService
+                AppLogger.i(TAG, "Creating JankGhostOverlayView with context: ${service::class.java.name}, overlayManager: ${overlayManager::class.java.name}")
+
                 jankOverlay = JankGhostOverlayView(service).apply {
-                    visibility = View.INVISIBLE
+                    visibility = View.VISIBLE // Make visible immediately so debug marker renders!
                 }
 
                 val layoutParams = WindowManager.LayoutParams(
@@ -152,9 +192,9 @@ class FrameThrottlingController(
                 }
 
                 overlayManager.addView(jankOverlay, layoutParams)
-                AppLogger.d(TAG, "Added JankGhostOverlayView to WindowManager with FLAG_NOT_TOUCHABLE")
+                AppLogger.i(TAG, "Successfully added JankGhostOverlayView to WindowManager with TYPE_ACCESSIBILITY_OVERLAY & FLAG_NOT_TOUCHABLE")
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error adding jank overlay view", e)
+                AppLogger.e(TAG, "Fatal error adding JankGhostOverlayView to WindowManager", e)
                 jankOverlay = null
             }
         }

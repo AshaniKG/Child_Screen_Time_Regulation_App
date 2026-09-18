@@ -185,21 +185,42 @@ class ScreenCaptureForegroundService : Service() {
         )
     }
 
+    private var acquireCallCount = 0L
+
     @Synchronized
     fun acquireLatestFrame(): Bitmap? {
-        val reader = imageReader ?: return null
+        acquireCallCount++
+        val reader = imageReader
+        if (reader == null) {
+            AppLogger.w(TAG, "acquireLatestFrame() called but imageReader is NULL")
+            return null
+        }
+
         var image: Image? = null
         try {
-            image = reader.acquireLatestImage() ?: return reusableTargetBitmap
+            image = reader.acquireLatestImage()
+            if (image == null) {
+                if (acquireCallCount % 30 == 0L) {
+                    AppLogger.d(TAG, "acquireLatestImage() returned NULL (reusing cached bitmap: ${reusableTargetBitmap != null})")
+                }
+                return reusableTargetBitmap
+            }
+
             val planes = image.planes
-            if (planes.isEmpty()) return null
+            if (planes.isEmpty()) {
+                AppLogger.w(TAG, "acquireLatestFrame() Image has 0 planes!")
+                return null
+            }
 
             val buffer: ByteBuffer = planes[0].buffer
             val pixelStride = planes[0].pixelStride
             val rowStride = planes[0].rowStride
             val rowPadding = rowStride - pixelStride * screenWidth
-
             val paddedWidth = screenWidth + rowPadding / pixelStride
+
+            if (acquireCallCount % 30 == 0L) {
+                AppLogger.d(TAG, "Frame acquired: ${image.width}x${image.height} | pixelStride=$pixelStride, rowStride=$rowStride, rowPadding=$rowPadding")
+            }
 
             if (rowPadding == 0) {
                 if (reusableTargetBitmap == null || reusableTargetBitmap?.isRecycled == true ||
@@ -225,7 +246,7 @@ class ScreenCaptureForegroundService : Service() {
                 return cropped
             }
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Error acquiring frame from ImageReader", e)
+            AppLogger.e(TAG, "Error acquiring frame from ImageReader: ${e.javaClass.simpleName} - ${e.message}", e)
             return null
         } finally {
             image?.close()
