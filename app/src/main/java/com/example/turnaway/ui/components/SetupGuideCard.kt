@@ -37,10 +37,12 @@ import com.example.turnaway.ui.theme.SuccessColor
 fun SetupGuideCard(
     hasOverlayPermission: Boolean,
     hasAccessibilityPermission: Boolean,
+    hasScreenCapturePermission: Boolean,
+    onRequestScreenCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     // Only show when at least one permission is missing
-    if (hasOverlayPermission && hasAccessibilityPermission) return
+    if (hasOverlayPermission && hasAccessibilityPermission && hasScreenCapturePermission) return
 
     val context = LocalContext.current
 
@@ -109,12 +111,23 @@ fun SetupGuideCard(
             PermissionStep(
                 stepNumber = "2",
                 title = "Enable wind-down service",
-                description = "Allows gradual touch slowdown during wind-down",
+                description = "Allows gradual touch slowdown and window monitoring",
                 isGranted = hasAccessibilityPermission,
                 onOpenSettings = {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     context.startActivity(intent)
                 }
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Step 3: Screen Capture Consent (MediaProjection)
+            PermissionStep(
+                stepNumber = "3",
+                title = "Grant screen capture consent",
+                description = "Enables hardware frame capture for smooth flow lag pacing",
+                isGranted = hasScreenCapturePermission,
+                onOpenSettings = onRequestScreenCapture
             )
         }
     }

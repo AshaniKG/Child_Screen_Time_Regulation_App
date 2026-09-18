@@ -119,7 +119,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
             overlayManager.addView(overlayView, layoutParams)
 
             desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
-            frameThrottlingController = FrameThrottlingController(this, overlayView, overlayManager)
+            frameThrottlingController = FrameThrottlingController(this, overlayManager)
             touchDelayQueueManager = TouchDelayQueueManager(this)
             
             var gesturePath = android.graphics.Path()

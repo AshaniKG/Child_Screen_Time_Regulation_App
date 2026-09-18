@@ -44,7 +44,8 @@ import com.example.turnaway.ui.viewmodel.DashboardViewModel
 @Composable
 fun ParentDashboardScreen(
     viewModel: DashboardViewModel,
-    onRequestBiometricAuth: () -> Unit
+    onRequestBiometricAuth: () -> Unit,
+    onRequestScreenCaptureConsent: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -139,7 +140,9 @@ fun ParentDashboardScreen(
                         // Setup guide (only shows if permissions are missing)
                         SetupGuideCard(
                             hasOverlayPermission = uiState.hasOverlayPermission,
-                            hasAccessibilityPermission = uiState.hasAccessibilityPermission
+                            hasAccessibilityPermission = uiState.hasAccessibilityPermission,
+                            hasScreenCapturePermission = uiState.hasScreenCapturePermission,
+                            onRequestScreenCapture = onRequestScreenCaptureConsent
                         )
 
                         // Session insights
@@ -176,7 +179,9 @@ fun ParentDashboardScreen(
                         // Permissions status
                         PermissionsCard(
                             hasOverlay = uiState.hasOverlayPermission,
-                            hasAccessibility = uiState.hasAccessibilityPermission
+                            hasAccessibility = uiState.hasAccessibilityPermission,
+                            hasScreenCapture = uiState.hasScreenCapturePermission,
+                            onRequestScreenCapture = onRequestScreenCaptureConsent
                         )
                     }
                 }
@@ -193,6 +198,8 @@ fun ParentDashboardScreen(
 private fun PermissionsCard(
     hasOverlay: Boolean,
     hasAccessibility: Boolean,
+    hasScreenCapture: Boolean,
+    onRequestScreenCapture: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -246,12 +253,24 @@ private fun PermissionsCard(
             // Accessibility permission
             PermissionRow(
                 title = "Wind-Down Service",
-                description = if (hasAccessibility) "Granted" else "Enables gradual touch slowdown",
+                description = if (hasAccessibility) "Granted" else "Enables gradual touch slowdown and app monitoring",
                 isGranted = hasAccessibility,
                 onAction = {
                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                     context.startActivity(intent)
                 }
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Screen Capture permission
+            PermissionRow(
+                title = "Screen Frame Capture",
+                description = if (hasScreenCapture) "Granted" else "Enables hardware frame capture for smooth flow lag pacing",
+                isGranted = hasScreenCapture,
+                onAction = onRequestScreenCapture
             )
         }
     }

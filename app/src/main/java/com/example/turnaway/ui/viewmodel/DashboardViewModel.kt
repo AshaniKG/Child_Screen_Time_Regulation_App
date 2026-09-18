@@ -12,6 +12,7 @@ import com.example.turnaway.data.entity.TargetAppEntity
 import com.example.turnaway.data.repository.SoftLandingRepository
 import com.example.turnaway.service.EngineBridge
 import com.example.turnaway.service.EngineStatusData
+import com.example.turnaway.service.ScreenCaptureForegroundService
 import com.example.turnaway.ui.state.DashboardUiState
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.Dispatchers
@@ -23,33 +24,46 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
     private val _isAuthenticated = MutableStateFlow(false)
     private val _hasOverlayPermission = MutableStateFlow(false)
     private val _hasAccessibilityPermission = MutableStateFlow(false)
+    private val _hasScreenCapturePermission = MutableStateFlow(false)
+
+    private val dataFlow = combine(
+        repository.getAllProfiles().map { it.firstOrNull() ?: RestrictionProfileEntity(profileName = "Standard") },
+        repository.getAllSchedules(),
+        repository.getAllTargetApps(),
+        repository.getRecentSessionLogs()
+    ) { profile, schedules, targetApps, logs ->
+        DataTuple(profile, schedules, targetApps, logs)
+    }
+
+    private val permissionsFlow = combine(
+        _hasOverlayPermission,
+        _hasAccessibilityPermission,
+        _hasScreenCapturePermission
+    ) { overlay, acc, capture ->
+        PermissionsTuple(overlay, acc, capture)
+    }
 
     val uiState: StateFlow<DashboardUiState> = combine(
         _isAuthenticated,
-        combine(
-            repository.getAllProfiles().map { it.firstOrNull() ?: RestrictionProfileEntity(profileName = "Standard") },
-            repository.getAllSchedules(),
-            repository.getAllTargetApps(),
-            repository.getRecentSessionLogs()
-        ) { profile, schedules, targetApps, logs -> DataTuple(profile, schedules, targetApps, logs) },
-        combine(EngineBridge.engineStatus, _hasOverlayPermission, _hasAccessibilityPermission) { status, overlay, acc ->
-            EnginePermissionsTuple(status, overlay, acc)
-        }
-    ) { auth, dataTuple, enginePerms ->
+        dataFlow,
+        EngineBridge.engineStatus,
+        permissionsFlow
+    ) { auth: Boolean, dataTuple: DataTuple, status: EngineStatusData, perms: PermissionsTuple ->
         DashboardUiState(
             isAuthenticated = auth,
             activeProfile = dataTuple.profile,
             activeSchedules = dataTuple.schedules,
             targetApps = dataTuple.targetApps,
-            currentEngineState = enginePerms.status.state,
-            timeRemainingInPhaseMs = enginePerms.status.timeRemainingMs,
-            currentSaturation = enginePerms.status.currentSaturation,
-            currentBlurRadius = enginePerms.status.currentBlurRadius,
-            currentTouchDelayMs = enginePerms.status.currentTouchDelayMs,
-            currentVolumePercent = enginePerms.status.currentVolumePercent,
+            currentEngineState = status.state,
+            timeRemainingInPhaseMs = status.timeRemainingMs,
+            currentSaturation = status.currentSaturation,
+            currentBlurRadius = status.currentBlurRadius,
+            currentTouchDelayMs = status.currentTouchDelayMs,
+            currentVolumePercent = status.currentVolumePercent,
             recentSessionLogs = dataTuple.sessionLogs,
-            hasOverlayPermission = enginePerms.hasOverlay,
-            hasAccessibilityPermission = enginePerms.hasAccessibility
+            hasOverlayPermission = perms.hasOverlay,
+            hasAccessibilityPermission = perms.hasAccessibility,
+            hasScreenCapturePermission = perms.hasScreenCapture
         )
     }.stateIn(
         scope = viewModelScope,
@@ -57,12 +71,17 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         initialValue = DashboardUiState()
     )
 
+    fun updateScreenCapturePermission(isGranted: Boolean) {
+        _hasScreenCapturePermission.value = isGranted
+    }
+
     fun checkPermissions(context: Context) {
         val hasOverlay = Settings.canDrawOverlays(context)
         val hasAccessibility = isAccessibilityServiceEnabled(context)
 
         _hasOverlayPermission.value = hasOverlay
         _hasAccessibilityPermission.value = hasAccessibility
+        _hasScreenCapturePermission.value = ScreenCaptureForegroundService.isProjectionActive.value
 
         scanAndSyncInstalledApps(context)
     }
@@ -207,8 +226,8 @@ private data class DataTuple(
     val sessionLogs: List<SessionLogEntity>
 )
 
-private data class EnginePermissionsTuple(
-    val status: EngineStatusData,
+private data class PermissionsTuple(
     val hasOverlay: Boolean,
-    val hasAccessibility: Boolean
+    val hasAccessibility: Boolean,
+    val hasScreenCapture: Boolean
 )

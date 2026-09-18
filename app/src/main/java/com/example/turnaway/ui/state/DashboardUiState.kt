@@ -19,5 +19,6 @@ data class DashboardUiState(
     val currentVolumePercent: Float = 1.0f,
     val recentSessionLogs: List<SessionLogEntity> = emptyList(),
     val hasOverlayPermission: Boolean = false,
-    val hasAccessibilityPermission: Boolean = false
+    val hasAccessibilityPermission: Boolean = false,
+    val hasScreenCapturePermission: Boolean = false
 )
