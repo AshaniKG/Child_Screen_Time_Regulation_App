@@ -12,6 +12,7 @@ import android.view.WindowManager
 import com.example.turnaway.service.ScreenCaptureForegroundService
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
+import kotlin.coroutines.resume
 import java.util.concurrent.atomic.AtomicBoolean
 
 class FrameThrottlingController(
@@ -43,6 +44,9 @@ class FrameThrottlingController(
             isThrottlingEnabled.set(true)
             if (isTargetAppForeground.get() && (throttleJob == null || throttleJob?.isActive == false)) {
                 startThrottlingLoop()
+            } else {
+                // Loop already running — immediately update pulse to new FPS
+                jankOverlay?.startPulse(clampedFps)
             }
             AppLogger.d(TAG, "Target FPS updated to: $clampedFps FPS (Interval: ${1000L / clampedFps}ms)")
         }
@@ -72,46 +76,54 @@ class FrameThrottlingController(
         throttleJob = controllerScope.launch {
             ensureOverlayAdded()
 
+            // Kick off the lag-pulse animation immediately on the overlay.
+            // The pulse drives all the visual "lag" effect — no screenshots required.
+            jankOverlay?.startPulse(targetFps)
+            AppLogger.i(TAG, "Lag pulse started at ${targetFps} FPS")
+
             var iteration = 0L
+            var lastCaptureAttemptTime = 0L
+
             while (isActive && isTargetAppForeground.get() && isThrottlingEnabled.get()) {
                 iteration++
                 val isMpActive = ScreenCaptureForegroundService.isProjectionActive.value
-                val currentFps = if (isMpActive) targetFps else 1 // Fallback to 1 FPS freeze if MP is revoked
-                val framePeriodMs = (1000L / currentFps.coerceAtLeast(1)).toLong()
+                val displayFps = targetFps.coerceAtLeast(1)
+                val framePeriodMs = (1000L / displayFps).toLong()
                 val startTime = System.currentTimeMillis()
 
-                AppLogger.d(TAG, "Loop iteration #$iteration | isMpActive=$isMpActive | currentFps=$currentFps | period=${framePeriodMs}ms")
+                // Update the pulse FPS if it has changed (e.g. wind-down ramp)
+                jankOverlay?.setDebugInfo(
+                    if (isMpActive) "MediaProjection" else "Lag Pulse",
+                    displayFps
+                )
 
                 if (isMpActive) {
-                    // 1. High-Performance MediaProjection Frame Pipeline
-                    val captureService = ScreenCaptureForegroundService.instance
-                    if (captureService == null) {
-                        AppLogger.w(TAG, "ScreenCaptureForegroundService.instance is null despite isMpActive=true")
-                    }
-                    val frameBitmap = captureService?.acquireLatestFrame()
-
+                    // Optional: pull MediaProjection frame to show real content under the pulse
+                    val frameBitmap = ScreenCaptureForegroundService.instance?.acquireLatestFrame()
                     if (frameBitmap != null && !frameBitmap.isRecycled) {
                         AppLogger.d(TAG, "MediaProjection frame acquired: ${frameBitmap.width}x${frameBitmap.height}")
-                        jankOverlay?.updateFrame(frameBitmap, "MediaProjection", currentFps)
-                    } else {
-                        AppLogger.w(TAG, "MediaProjection acquireLatestFrame() returned NULL")
-                        jankOverlay?.setDebugInfo("MediaProjection (Frame Null)", currentFps)
+                        // updateFrame in new overlay just notes the source, keeps pulse running
+                        jankOverlay?.updateFrame(frameBitmap, "MediaProjection", displayFps)
                     }
-                } else {
-                    // 2. Resilient Fallback: takeScreenshot() at 1 FPS Freeze Mode
-                    AppLogger.w(TAG, "MediaProjection inactive; falling back to AccessibilityService.takeScreenshot() (1 FPS)")
-                    jankOverlay?.setDebugInfo("takeScreenshot fallback", currentFps)
-                    takeScreenshotFallback(currentFps)
+                }
+                // No else-branch screenshot needed — the pulse IS the lag effect
+
+                // Re-start pulse if FPS changed significantly (wind-down ramp)
+                if (iteration % 30L == 0L) {
+                    AppLogger.d(TAG, "Loop iteration #$iteration | isMpActive=$isMpActive | displayFps=$displayFps")
+                    jankOverlay?.startPulse(displayFps)  // Restarts with updated period/alpha
                 }
 
                 val elapsedMs = System.currentTimeMillis() - startTime
-                val sleepTime = (framePeriodMs - elapsedMs).coerceAtLeast(10L)
+                val sleepTime = (framePeriodMs - elapsedMs).coerceAtLeast(16L)
                 delay(sleepTime)
             }
 
+            jankOverlay?.stopPulse()
             removeOverlay()
         }
     }
+
 
     private suspend fun takeScreenshotFallback(fps: Int) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
@@ -143,7 +155,7 @@ class FrameThrottlingController(
                         } catch (e: Exception) {
                             AppLogger.e(TAG, "Fallback screenshot conversion error: ${e.message}", e)
                         } finally {
-                            if (cont.isActive) cont.resume(Unit, null)
+                            if (cont.isActive) cont.resume(Unit)
                         }
                     }
 
@@ -157,12 +169,12 @@ class FrameThrottlingController(
                             else -> "UNKNOWN_ERROR ($errorCode)"
                         }
                         AppLogger.e(TAG, "takeScreenshot FAILED! Error code: $errorName")
-                        if (cont.isActive) cont.resume(Unit, null)
+                        if (cont.isActive) cont.resume(Unit)
                     }
                 })
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Exception during takeScreenshot() invocation", e)
-                if (cont.isActive) cont.resume(Unit, null)
+                if (cont.isActive) cont.resume(Unit)
             }
         }
     }

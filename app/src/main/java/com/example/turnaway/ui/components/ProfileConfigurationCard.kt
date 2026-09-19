@@ -104,7 +104,7 @@ fun ProfileConfigurationCard(
                 )
             }
 
-            // Screen Dimming
+            // Screen Blur & Softening
             Column {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -113,11 +113,12 @@ fun ProfileConfigurationCard(
                     Icon(
                         imageVector = Icons.Outlined.ColorLens,
                         contentDescription = null,
-                        modifier = Modifier.padding(end = 12.dp)
+                        modifier = Modifier.padding(end = 12.dp),
+                        tint = MaterialTheme.colorScheme.primary
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "Screen Dimming", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        Text(text = "Gradually fade colors and blur the screen", style = MaterialTheme.typography.bodySmall)
+                        Text(text = "Screen Blur & Softening", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "Gradually blur and soften the screen during wind-down", style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(
                         checked = enableDimming,
@@ -126,25 +127,38 @@ fun ProfileConfigurationCard(
                 }
                 AnimatedVisibility(visible = enableDimming) {
                     Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
-                        Text(
-                            text = "Screen Softening",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                        val blurLabel = when {
-                            blurIntensity <= 3f -> "Low"
-                            blurIntensity <= 7f -> "Medium"
-                            else -> "High"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Blur Intensity",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                            val intensityText = when (blurIntensity.toInt()) {
+                                in 1..3 -> "Low (${blurIntensity.toInt()} px)"
+                                in 4..7 -> "Medium (${blurIntensity.toInt()} px)"
+                                in 8..9 -> "High (${blurIntensity.toInt()} px)"
+                                else -> "Maximum (10 px)"
+                            }
+                            Text(
+                                text = intensityText,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
                         }
-                        Text(
-                            text = blurLabel,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
                         Slider(
                             value = blurIntensity,
                             onValueChange = { blurIntensity = it },
                             valueRange = 1f..10f,
-                            steps = 2
+                            steps = 8
+                        )
+                        Text(
+                            text = "Highest blur reaches ${blurIntensity.toInt()} px (maximum 10 px) at the end of wind-down.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -292,7 +306,7 @@ fun ProfileConfigurationCard(
                         transitionDurationMinutes = transitionDuration.toInt(),
                         curveType = curveTypeStr,
                         enableColorDesaturation = enableDimming,
-                        maxBlurRadius = blurIntensity.toInt(),
+                        maxBlurRadius = blurIntensity.toInt().coerceIn(1, 10),
                         enableFrameThrottling = enableFrameThrottling,
                         minFpsFloor = minFpsFloor.toInt(),
                         enableTouchDelay = enableTouchSlowdown,

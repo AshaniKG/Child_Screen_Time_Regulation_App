@@ -131,7 +131,7 @@ fun EngineStatusCard(
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Text(
-                        text = "Screen FPS lag & stutter overlay active",
+                        text = if (currentBlurRadius > 0) "Screen blur active (${currentBlurRadius} px) & FPS lag throttling" else "Screen FPS lag throttling active",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

@@ -312,9 +312,14 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 while (elapsedMs < durationMs && isActive) {
                     val progress = elapsedMs.toFloat() / durationMs.toFloat()
 
-                    // Screen dimming removed per instructions: keep saturation at 1.0f and blur at 0
+                    // Gradual Gaussian blur: ramps smoothly from 0 to profile.maxBlurRadius (max 10px) over the transition
                     val saturation = 1.0f
-                    val blurRadius = 0
+                    val maxBlur = profile.maxBlurRadius.coerceIn(1, 10).toFloat()
+                    val blurRadiusFloat = if (profile.enableColorDesaturation) {
+                        val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
+                        (maxBlur * decay).coerceIn(0f, maxBlur)
+                    } else 0f
+                    val blurRadiusDisplay = (blurRadiusFloat + 0.5f).toInt().coerceIn(0, 10)
 
                     // Pure Screen FPS Lag focus
                     val targetFps = if (profile.enableFrameThrottling) {
@@ -322,7 +327,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     } else 60
 
                     // Touch delay & audio fade disabled for now per user focus on screen FPS lag
-                    desaturationController.updateSaturationAndBlur(1.0f, 0)
+                    desaturationController.updateSaturationAndBlur(saturation, blurRadiusFloat)
                     frameThrottlingController.setTargetFps(targetFps)
                     touchDelayQueueManager.setTouchDelay(0L)
 
@@ -336,7 +341,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             state = EngineState.SOFT_LANDING_TRANSITION,
                             timeRemainingMs = remainingMs,
                             currentSaturation = saturation,
-                            currentBlurRadius = blurRadius,
+                            currentBlurRadius = blurRadiusDisplay,
                             currentFps = targetFps,
                             currentTouchDelayMs = 0L,
                             currentVolumePercent = 1.0f,
@@ -350,7 +355,9 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
                 if (isActive) {
                     AppLogger.w(TAG, "Soft-Landing transition reached complete lockout phase (Lag remains active)")
-                    desaturationController.updateSaturationAndBlur(1.0f, 0)
+                    val maxBlur = profile.maxBlurRadius.coerceIn(1, 10)
+                    val finalBlur = if (profile.enableColorDesaturation) maxBlur else 0
+                    desaturationController.updateSaturationAndBlur(1.0f, finalBlur)
                     frameThrottlingController.setTargetFps(profile.minFpsFloor)
                     touchDelayQueueManager.setTouchDelay(0L)
 
@@ -363,7 +370,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             state = EngineState.LOCKED_OUT,
                             timeRemainingMs = 0L,
                             currentSaturation = 1.0f,
-                            currentBlurRadius = 0,
+                            currentBlurRadius = finalBlur,
                             currentFps = profile.minFpsFloor,
                             currentTouchDelayMs = 0L,
                             currentVolumePercent = 1.0f,
