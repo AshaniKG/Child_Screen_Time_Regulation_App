@@ -293,7 +293,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     DecayCurveType.LINEAR
                 }
 
-                AppLogger.i(TAG, "Transition window started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}, MinFps: ${profile.minFpsFloor}")
+                AppLogger.i(TAG, "Gradual degradation started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}")
+
+                // Ensure initial full color at start of degradation
+                if (profile.enableColorDesaturation) {
+                    desaturationController.updateSaturationAndBlur(1.0f, 0f)
+                }
+
+                // Ensure frame throttling & touch delay are disengaged
+                frameThrottlingController.stopThrottling()
+                touchDelayQueueManager.setTouchDelay(0L)
 
                 EngineBridge.updateStatus(
                     EngineStatusData(
@@ -309,30 +318,25 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 )
 
                 var elapsedMs = 0L
+                val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+
                 while (elapsedMs < durationMs && isActive) {
                     val progress = elapsedMs.toFloat() / durationMs.toFloat()
+                    val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
 
-                    // Gradual Gaussian blur: ramps smoothly from 0 to profile.maxBlurRadius (max 10px) over the transition
-                    val saturation = 1.0f
-                    val maxBlur = profile.maxBlurRadius.coerceIn(1, 10).toFloat()
-                    val blurRadiusFloat = if (profile.enableColorDesaturation) {
-                        val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
-                        (maxBlur * decay).coerceIn(0f, maxBlur)
-                    } else 0f
-                    val blurRadiusDisplay = (blurRadiusFloat + 0.5f).toInt().coerceIn(0, 10)
+                    // 1. Smooth gradual Grayscale desaturation (from 100% full color down to 0% monochromacy)
+                    val saturationFactor = (1.0f - decay).coerceIn(0.0f, 1.0f)
+                    if (profile.enableColorDesaturation) {
+                        desaturationController.updateSaturationAndBlur(saturationFactor, 0f)
+                    }
 
-                    // Pure Screen FPS Lag focus
-                    val targetFps = if (profile.enableFrameThrottling) {
-                        DecayCurveCalculator.calculateTargetFps(progress, profile.minFpsFloor, curveType)
-                    } else 60
-
-                    // Touch delay & audio fade disabled for now per user focus on screen FPS lag
-                    desaturationController.updateSaturationAndBlur(saturation, blurRadiusFloat)
-                    frameThrottlingController.setTargetFps(targetFps)
-                    touchDelayQueueManager.setTouchDelay(0L)
-
-                    withContext(Dispatchers.Main) {
-                        updateOverlayTouchableState(false)
+                    // 2. Audio Volume Reduction
+                    var currentVolPercent = 1.0f
+                    if (profile.enableAudioFade && audioManager != null) {
+                        val targetVol = ((1.0f - decay) * maxVolume).toInt().coerceIn(0, maxVolume)
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
+                        currentVolPercent = if (maxVolume > 0) targetVol.toFloat() / maxVolume.toFloat() else 0f
                     }
 
                     val remainingMs = durationMs - elapsedMs
@@ -340,11 +344,11 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         EngineStatusData(
                             state = EngineState.SOFT_LANDING_TRANSITION,
                             timeRemainingMs = remainingMs,
-                            currentSaturation = saturation,
-                            currentBlurRadius = blurRadiusDisplay,
-                            currentFps = targetFps,
+                            currentSaturation = saturationFactor,
+                            currentBlurRadius = 0,
+                            currentFps = 60,
                             currentTouchDelayMs = 0L,
-                            currentVolumePercent = 1.0f,
+                            currentVolumePercent = currentVolPercent,
                             activeProfile = profile
                         )
                     )
@@ -354,26 +358,25 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 }
 
                 if (isActive) {
-                    AppLogger.w(TAG, "Soft-Landing transition reached complete lockout phase (Lag remains active)")
-                    val maxBlur = profile.maxBlurRadius.coerceIn(1, 10)
-                    val finalBlur = if (profile.enableColorDesaturation) maxBlur else 0
-                    desaturationController.updateSaturationAndBlur(1.0f, finalBlur)
-                    frameThrottlingController.setTargetFps(profile.minFpsFloor)
-                    touchDelayQueueManager.setTouchDelay(0L)
+                    AppLogger.w(TAG, "Degradation complete. Screen is 100% grayscale.")
 
-                    withContext(Dispatchers.Main) {
-                        updateOverlayTouchableState(false)
+                    // Final state at end of duration: 100% grayscale, Audio volume min
+                    if (profile.enableColorDesaturation) {
+                        desaturationController.updateSaturationAndBlur(0.0f, 0f)
+                    }
+                    if (profile.enableAudioFade && audioManager != null) {
+                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
                     }
 
                     EngineBridge.updateStatus(
                         EngineStatusData(
                             state = EngineState.LOCKED_OUT,
                             timeRemainingMs = 0L,
-                            currentSaturation = 1.0f,
-                            currentBlurRadius = finalBlur,
-                            currentFps = profile.minFpsFloor,
+                            currentSaturation = 0.0f,
+                            currentBlurRadius = 0,
+                            currentFps = 60,
                             currentTouchDelayMs = 0L,
-                            currentVolumePercent = 1.0f,
+                            currentVolumePercent = 0.0f,
                             activeProfile = profile
                         )
                     )
@@ -384,18 +387,21 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         timeToDisengageMs = durationMs,
                         wasAborted = false
                     )
-
-                    // Retain maximum lag throttling without locking device screen so Stop button remains available
                 }
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error in transition window coroutine", e)
+                AppLogger.e(TAG, "Error in degradation transition coroutine", e)
             }
         }
     }
 
     private fun abortTransition() {
         transitionJob?.cancel()
-        desaturationController.updateSaturationAndBlur(1.0f, 0)
+
+        // Immediately restore full color display (disable grayscale)
+        if (activeProfile.enableColorDesaturation) {
+            desaturationController.updateSaturationAndBlur(1.0f, 0f)
+        }
+
         frameThrottlingController.stopThrottling()
         touchDelayQueueManager.setTouchDelay(0L)
         updateOverlayTouchableState(false)

@@ -31,8 +31,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.turnaway.ui.components.AdbGrayscaleCard
 import com.example.turnaway.ui.components.DisengagementAnalyticsCard
 import com.example.turnaway.ui.components.EngineStatusCard
+import com.example.turnaway.ui.components.GrayscalePermissionDialog
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
 import com.example.turnaway.ui.components.SetupGuideCard
@@ -51,9 +53,19 @@ fun ParentDashboardScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showGrayscaleDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.checkPermissions(context)
+    }
+
+    if (showGrayscaleDialog) {
+        GrayscalePermissionDialog(
+            onDismissRequest = { showGrayscaleDialog = false },
+            onPermissionGranted = {
+                viewModel.checkPermissions(context)
+            }
+        )
     }
 
     if (!uiState.isAuthenticated) {
@@ -133,8 +145,30 @@ fun ParentDashboardScreen(
                             currentBlurRadius = uiState.currentBlurRadius,
                             currentTouchDelayMs = uiState.currentTouchDelayMs,
                             currentVolumePercent = uiState.currentVolumePercent,
-                            onTriggerManualLanding = { viewModel.triggerImmediateSoftLanding() },
-                            onEmergencyAbort = { viewModel.abortCurrentTransition() }
+                            onTriggerManualLanding = {
+                                if (uiState.hasWriteSecureSettingsPermission) {
+                                    viewModel.triggerImmediateSoftLanding(context)
+                                } else {
+                                    showGrayscaleDialog = true
+                                }
+                            },
+                            onEmergencyAbort = { viewModel.abortCurrentTransition(context) }
+                        )
+
+                        // Native System Grayscale Control Card
+                        AdbGrayscaleCard(
+                            hasAdbPermission = uiState.hasWriteSecureSettingsPermission,
+                            isGrayscaleActive = uiState.isGrayscaleActive,
+                            onStartDegradation = {
+                                if (uiState.hasWriteSecureSettingsPermission) {
+                                    viewModel.triggerImmediateSoftLanding(context)
+                                } else {
+                                    showGrayscaleDialog = true
+                                }
+                            },
+                            onRequestPermission = {
+                                showGrayscaleDialog = true
+                            }
                         )
 
                         // Setup guide (only shows if permissions are missing)

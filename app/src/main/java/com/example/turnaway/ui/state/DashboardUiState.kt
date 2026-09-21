@@ -20,5 +20,7 @@ data class DashboardUiState(
     val recentSessionLogs: List<SessionLogEntity> = emptyList(),
     val hasOverlayPermission: Boolean = false,
     val hasAccessibilityPermission: Boolean = false,
-    val hasScreenCapturePermission: Boolean = false
+    val hasScreenCapturePermission: Boolean = false,
+    val hasWriteSecureSettingsPermission: Boolean = false,
+    val isGrayscaleActive: Boolean = false
 )

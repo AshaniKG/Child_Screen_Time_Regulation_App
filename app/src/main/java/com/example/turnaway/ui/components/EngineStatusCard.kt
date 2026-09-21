@@ -62,8 +62,8 @@ fun EngineStatusCard(
                 Text(
                     text = when (engineState) {
                         EngineState.MONITORING -> "Ready"
-                        EngineState.SOFT_LANDING_TRANSITION -> "Winding Down…"
-                        EngineState.LOCKED_OUT -> "Wind-Down Complete"
+                        EngineState.SOFT_LANDING_TRANSITION -> "Degrading…"
+                        EngineState.LOCKED_OUT -> "Degradation Complete"
                     },
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
@@ -81,7 +81,7 @@ fun EngineStatusCard(
             ) {
                 Column {
                     Text(
-                        text = "Device is running normally. You can start the wind-down sequence at any time.",
+                        text = "Device is running normally. Start degradation to begin smooth grayscale transition over your configured duration.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -90,7 +90,7 @@ fun EngineStatusCard(
                         onClick = onTriggerManualLanding,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Start Wind-Down")
+                        Text("Start Degradation")
                     }
                 }
             }
@@ -113,13 +113,10 @@ fun EngineStatusCard(
                     
                     Spacer(modifier = Modifier.height(8.dp))
                     
-                    // Simple progress bar based on time remaining.
-                    // Assuming a standard 5-minute (300000ms) wind down for progress calculation
-                    val totalTimeMs = 300000f
-                    val progress = 1f - (timeRemainingMs.toFloat() / totalTimeMs).coerceIn(0f, 1f)
+                    val colorPercent = (currentSaturation * 100).toInt().coerceIn(0, 100)
 
                     LinearProgressIndicator(
-                        progress = { progress },
+                        progress = { 1.0f - currentSaturation },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
@@ -131,7 +128,7 @@ fun EngineStatusCard(
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Text(
-                        text = if (currentBlurRadius > 0) "Screen blur active (${currentBlurRadius} px) & FPS lag throttling" else "Screen FPS lag throttling active",
+                        text = "Gradual grayscale active ($colorPercent% color remaining)",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -146,7 +143,7 @@ fun EngineStatusCard(
                             contentColor = MaterialTheme.colorScheme.onError
                         )
                     ) {
-                        Text("Stop Wind-Down")
+                        Text("Stop Degradation")
                     }
                 }
             }
@@ -158,7 +155,7 @@ fun EngineStatusCard(
             ) {
                 Column {
                     Text(
-                        text = "Wind-down transition is complete. Screen is dimmed and locked.",
+                        text = "Degradation transition complete. Screen is fully in grayscale.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -171,7 +168,7 @@ fun EngineStatusCard(
                             contentColor = MaterialTheme.colorScheme.onError
                         )
                     ) {
-                        Text("Stop Wind-Down")
+                        Text("Stop Degradation")
                     }
                 }
             }

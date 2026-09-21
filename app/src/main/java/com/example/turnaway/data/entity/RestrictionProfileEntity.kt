@@ -10,11 +10,11 @@ data class RestrictionProfileEntity(
     val profileName: String,
     val transitionDurationMinutes: Int = 2,
     val curveType: String = "LINEAR", // LINEAR, EXPONENTIAL, SIGMOIDAL
-    val enableColorDesaturation: Boolean = true,
-    val maxBlurRadius: Int = 10,
-    val enableFrameThrottling: Boolean = true,
-    val enableTouchDelay: Boolean = true,
-    val minFpsFloor: Int = 5,
-    val maxTouchDelayMs: Long = 800L,
-    val enableAudioFade: Boolean = true
+    val enableColorDesaturation: Boolean = true,  // System-wide native Grayscale
+    val maxBlurRadius: Int = 0,                    // Disabled (0px)
+    val enableFrameThrottling: Boolean = false,    // Disabled
+    val enableTouchDelay: Boolean = false,         // Disabled
+    val minFpsFloor: Int = 60,                     // 60 FPS normal
+    val maxTouchDelayMs: Long = 0L,                // 0ms delay
+    val enableAudioFade: Boolean = true            // Audio Volume Reduction
 )
