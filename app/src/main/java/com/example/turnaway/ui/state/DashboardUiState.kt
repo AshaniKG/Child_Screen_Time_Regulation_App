@@ -15,12 +15,12 @@ data class DashboardUiState(
     val timeRemainingInPhaseMs: Long = 0L,
     val currentSaturation: Float = 1.0f,
     val currentBlurRadius: Int = 0,
+    val currentFps: Int = 60,
     val currentTouchDelayMs: Long = 0L,
     val currentVolumePercent: Float = 1.0f,
     val recentSessionLogs: List<SessionLogEntity> = emptyList(),
     val hasOverlayPermission: Boolean = false,
     val hasAccessibilityPermission: Boolean = false,
-    val hasScreenCapturePermission: Boolean = false,
     val hasWriteSecureSettingsPermission: Boolean = false,
     val isGrayscaleActive: Boolean = false
 )

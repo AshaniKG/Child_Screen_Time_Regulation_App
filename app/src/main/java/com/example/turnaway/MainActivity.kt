@@ -23,21 +23,6 @@ class MainActivity : FragmentActivity() {
     private lateinit var viewModel: DashboardViewModel
     private lateinit var biometricSecurityGate: BiometricSecurityGate
 
-    private val screenCaptureLauncher = registerForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == RESULT_OK && result.data != null) {
-            AppLogger.i("MainActivity", "Screen capture permission granted by parent")
-            com.example.turnaway.service.ScreenCaptureForegroundService.start(this, result.resultCode, result.data!!)
-            viewModel.updateScreenCapturePermission(true)
-            Toast.makeText(this, "Screen capture enabled for wind-down pacing", Toast.LENGTH_SHORT).show()
-        } else {
-            AppLogger.w("MainActivity", "Screen capture permission cancelled or denied")
-            viewModel.updateScreenCapturePermission(false)
-            Toast.makeText(this, "Screen capture was not granted", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -64,25 +49,12 @@ class MainActivity : FragmentActivity() {
                                 Toast.makeText(this, "Authentication failed: $error", Toast.LENGTH_SHORT).show()
                             }
                         )
-                    },
-                    onRequestScreenCaptureConsent = {
-                        requestScreenCaptureConsent()
                     }
                 )
             }
         }
 
         viewModel.checkPermissions(this)
-    }
-
-    fun requestScreenCaptureConsent() {
-        try {
-            val mpManager = getSystemService(android.content.Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
-            screenCaptureLauncher.launch(mpManager.createScreenCaptureIntent())
-        } catch (e: Exception) {
-            AppLogger.e("MainActivity", "Error launching screen capture consent dialog", e)
-            Toast.makeText(this, "Error requesting screen capture: ${e.message}", Toast.LENGTH_SHORT).show()
-        }
     }
 
     override fun onResume() {

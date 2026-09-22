@@ -86,5 +86,9 @@ class DecayCurveCalculatorTest {
 
         // Also test with default maxBlurRadius = 10
         assertEquals(10, DecayCurveCalculator.calculateBlurRadius(1.0f, type = DecayCurveType.LINEAR))
+
+        // Also test with 80px blur
+        assertEquals(40, DecayCurveCalculator.calculateBlurRadius(0.5f, 80, DecayCurveType.LINEAR))
+        assertEquals(80, DecayCurveCalculator.calculateBlurRadius(1.0f, 80, DecayCurveType.LINEAR))
     }
 }

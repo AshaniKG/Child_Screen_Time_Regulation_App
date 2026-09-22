@@ -54,7 +54,7 @@ object DecayCurveCalculator {
     }
 
     /**
-     * Calculates blur radius in pixels in [0, maxBlurRadius] (max default: 10px Gaussian blur)
+     * Calculates blur radius in pixels in [0, maxBlurRadius] (up to maxBlurRadius, default: 10)
      */
     fun calculateBlurRadius(progress: Float, maxBlurRadius: Int = 10, type: DecayCurveType): Int {
         val decay = calculateDecay(progress, type)

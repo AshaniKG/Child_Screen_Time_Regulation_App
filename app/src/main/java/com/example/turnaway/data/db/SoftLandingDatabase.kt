@@ -17,7 +17,7 @@ import com.example.turnaway.data.entity.TargetAppEntity
         SessionLogEntity::class,
         TargetAppEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class SoftLandingDatabase : RoomDatabase() {

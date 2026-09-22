@@ -1,10 +1,6 @@
 package com.example.turnaway.ui.screens
 
-import android.content.Intent
-import android.net.Uri
-import android.provider.Settings
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,10 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -31,23 +25,19 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.turnaway.ui.components.AdbGrayscaleCard
 import com.example.turnaway.ui.components.DisengagementAnalyticsCard
 import com.example.turnaway.ui.components.EngineStatusCard
 import com.example.turnaway.ui.components.GrayscalePermissionDialog
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
-import com.example.turnaway.ui.components.SetupGuideCard
 import com.example.turnaway.ui.components.TargetAppsCard
-import com.example.turnaway.ui.theme.SuccessColor
 import com.example.turnaway.ui.viewmodel.DashboardViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ParentDashboardScreen(
     viewModel: DashboardViewModel,
-    onRequestBiometricAuth: () -> Unit,
-    onRequestScreenCaptureConsent: () -> Unit = {}
+    onRequestBiometricAuth: () -> Unit
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -132,7 +122,71 @@ fun ParentDashboardScreen(
                     .padding(padding)
                     .verticalScroll(rememberScrollState())
             ) {
-                Spacer(modifier = Modifier.height(4.dp))
+                // Top Warning Banner when Time Limit Exceeded
+                AnimatedVisibility(
+                    visible = uiState.currentEngineState == com.example.turnaway.service.EngineState.LOCKED_OUT,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically()
+                ) {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error),
+                        shape = RoundedCornerShape(16.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Warning,
+                                    contentDescription = null,
+                                    tint = androidx.compose.ui.graphics.Color.White,
+                                    modifier = Modifier.size(26.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = "TIME LIMIT EXCEEDED",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = androidx.compose.ui.graphics.Color.White
+                                    )
+                                    Text(
+                                        text = "Wind-down restrictions active",
+                                        fontSize = 11.sp,
+                                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f)
+                                    )
+                                }
+                            }
+                            Button(
+                                onClick = { viewModel.abortCurrentTransition(context) },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = androidx.compose.ui.graphics.Color.White,
+                                    contentColor = MaterialTheme.colorScheme.error
+                                ),
+                                shape = RoundedCornerShape(12.dp),
+                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Stop,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("STOP", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
 
                 when (selectedTab) {
                     // ─── HOME TAB ───
@@ -141,42 +195,18 @@ fun ParentDashboardScreen(
                         EngineStatusCard(
                             engineState = uiState.currentEngineState,
                             timeRemainingMs = uiState.timeRemainingInPhaseMs,
-                            currentSaturation = uiState.currentSaturation,
-                            currentBlurRadius = uiState.currentBlurRadius,
+                            activeProfile = uiState.activeProfile,
                             currentTouchDelayMs = uiState.currentTouchDelayMs,
                             currentVolumePercent = uiState.currentVolumePercent,
+                            transitionDurationMinutes = uiState.activeProfile.transitionDurationMinutes,
+                            onDurationChange = { minutes -> viewModel.setCustomTransitionDuration(minutes) },
                             onTriggerManualLanding = {
-                                if (uiState.hasWriteSecureSettingsPermission) {
-                                    viewModel.triggerImmediateSoftLanding(context)
-                                } else {
+                                viewModel.triggerImmediateSoftLanding(context)
+                                if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
                                     showGrayscaleDialog = true
                                 }
                             },
                             onEmergencyAbort = { viewModel.abortCurrentTransition(context) }
-                        )
-
-                        // Native System Grayscale Control Card
-                        AdbGrayscaleCard(
-                            hasAdbPermission = uiState.hasWriteSecureSettingsPermission,
-                            isGrayscaleActive = uiState.isGrayscaleActive,
-                            onStartDegradation = {
-                                if (uiState.hasWriteSecureSettingsPermission) {
-                                    viewModel.triggerImmediateSoftLanding(context)
-                                } else {
-                                    showGrayscaleDialog = true
-                                }
-                            },
-                            onRequestPermission = {
-                                showGrayscaleDialog = true
-                            }
-                        )
-
-                        // Setup guide (only shows if permissions are missing)
-                        SetupGuideCard(
-                            hasOverlayPermission = uiState.hasOverlayPermission,
-                            hasAccessibilityPermission = uiState.hasAccessibilityPermission,
-                            hasScreenCapturePermission = uiState.hasScreenCapturePermission,
-                            onRequestScreenCapture = onRequestScreenCaptureConsent
                         )
 
                         // Session insights
@@ -209,143 +239,10 @@ fun ParentDashboardScreen(
                             schedules = uiState.activeSchedules,
                             onAddSchedule = { newSched -> viewModel.addSchedule(newSched) }
                         )
-
-                        // Permissions status
-                        PermissionsCard(
-                            hasOverlay = uiState.hasOverlayPermission,
-                            hasAccessibility = uiState.hasAccessibilityPermission,
-                            hasScreenCapture = uiState.hasScreenCapturePermission,
-                            onRequestScreenCapture = onRequestScreenCaptureConsent
-                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-}
-
-// ─── Permissions Card (Settings tab) ───
-
-@Composable
-private fun PermissionsCard(
-    hasOverlay: Boolean,
-    hasAccessibility: Boolean,
-    hasScreenCapture: Boolean,
-    onRequestScreenCapture: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val context = LocalContext.current
-
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        shape = RoundedCornerShape(20.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Outlined.Shield,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    "App Permissions",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Overlay permission
-            PermissionRow(
-                title = "Screen Overlay",
-                description = if (hasOverlay) "Granted" else "Allows the wind-down effect over other apps",
-                isGranted = hasOverlay,
-                onAction = {
-                    val intent = Intent(
-                        Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                        Uri.parse("package:${context.packageName}")
-                    )
-                    context.startActivity(intent)
-                }
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Accessibility permission
-            PermissionRow(
-                title = "Wind-Down Service",
-                description = if (hasAccessibility) "Granted" else "Enables gradual touch slowdown and app monitoring",
-                isGranted = hasAccessibility,
-                onAction = {
-                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                    context.startActivity(intent)
-                }
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Screen Capture permission
-            PermissionRow(
-                title = "Screen Frame Capture",
-                description = if (hasScreenCapture) "Granted" else "Enables hardware frame capture for smooth flow lag pacing",
-                isGranted = hasScreenCapture,
-                onAction = onRequestScreenCapture
-            )
-        }
-    }
-}
-
-@Composable
-private fun PermissionRow(
-    title: String,
-    description: String,
-    isGranted: Boolean,
-    onAction: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = if (isGranted) Icons.Outlined.CheckCircle else Icons.Default.Warning,
-            contentDescription = null,
-            tint = if (isGranted) SuccessColor else MaterialTheme.colorScheme.tertiary,
-            modifier = Modifier.size(20.dp)
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.SemiBold
-            )
-            Text(
-                description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        if (!isGranted) {
-            FilledTonalButton(
-                onClick = onAction,
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp)
-            ) {
-                Text("Set up", style = MaterialTheme.typography.labelMedium)
             }
         }
     }

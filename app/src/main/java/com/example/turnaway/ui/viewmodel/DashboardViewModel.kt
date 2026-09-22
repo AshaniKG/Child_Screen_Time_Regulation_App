@@ -13,7 +13,6 @@ import com.example.turnaway.data.repository.SoftLandingRepository
 import com.example.turnaway.service.EngineBridge
 import com.example.turnaway.service.EngineState
 import com.example.turnaway.service.EngineStatusData
-import com.example.turnaway.service.ScreenCaptureForegroundService
 import com.example.turnaway.ui.state.DashboardUiState
 import com.example.turnaway.util.AppLogger
 import com.example.turnaway.util.GrayscaleManager
@@ -27,7 +26,6 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
     private val _isAuthenticated = MutableStateFlow(false)
     private val _hasOverlayPermission = MutableStateFlow(false)
     private val _hasAccessibilityPermission = MutableStateFlow(false)
-    private val _hasScreenCapturePermission = MutableStateFlow(false)
     private val _hasWriteSecureSettingsPermission = MutableStateFlow(false)
     private val _isGrayscaleActive = MutableStateFlow(false)
 
@@ -43,11 +41,10 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
     private val permissionsFlow = combine(
         _hasOverlayPermission,
         _hasAccessibilityPermission,
-        _hasScreenCapturePermission,
         _hasWriteSecureSettingsPermission,
         _isGrayscaleActive
-    ) { overlay, acc, capture, secureSettings, grayscaleActive ->
-        PermissionsTuple(overlay, acc, capture, secureSettings, grayscaleActive)
+    ) { overlay, acc, secureSettings, grayscaleActive ->
+        PermissionsTuple(overlay, acc, secureSettings, grayscaleActive)
     }
 
     val uiState: StateFlow<DashboardUiState> = combine(
@@ -65,12 +62,12 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             timeRemainingInPhaseMs = status.timeRemainingMs,
             currentSaturation = status.currentSaturation,
             currentBlurRadius = status.currentBlurRadius,
+            currentFps = status.currentFps,
             currentTouchDelayMs = status.currentTouchDelayMs,
             currentVolumePercent = status.currentVolumePercent,
             recentSessionLogs = dataTuple.sessionLogs,
             hasOverlayPermission = perms.hasOverlay,
             hasAccessibilityPermission = perms.hasAccessibility,
-            hasScreenCapturePermission = perms.hasScreenCapture,
             hasWriteSecureSettingsPermission = perms.hasWriteSecureSettings,
             isGrayscaleActive = perms.isGrayscaleActive
         )
@@ -80,17 +77,12 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         initialValue = DashboardUiState()
     )
 
-    fun updateScreenCapturePermission(isGranted: Boolean) {
-        _hasScreenCapturePermission.value = isGranted
-    }
-
     fun checkPermissions(context: Context) {
         val hasOverlay = Settings.canDrawOverlays(context)
         val hasAccessibility = isAccessibilityServiceEnabled(context)
 
         _hasOverlayPermission.value = hasOverlay
         _hasAccessibilityPermission.value = hasAccessibility
-        _hasScreenCapturePermission.value = ScreenCaptureForegroundService.isProjectionActive.value
         _hasWriteSecureSettingsPermission.value = GrayscaleManager.isPermissionGranted(context)
         _isGrayscaleActive.value = GrayscaleManager.isGrayscaleActive(context)
 
@@ -219,102 +211,28 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         }
     }
 
-    private var degradationJob: kotlinx.coroutines.Job? = null
+    fun setCustomTransitionDuration(durationMinutes: Int) {
+        val current = uiState.value.activeProfile
+        val updated = current.copy(transitionDurationMinutes = durationMinutes.coerceAtLeast(1))
+        saveProfile(updated)
+        AppLogger.i("Configuration", "Updated transition duration to ${updated.transitionDurationMinutes} minutes")
+    }
 
     fun triggerImmediateSoftLanding(context: Context) {
-        if (!GrayscaleManager.isPermissionGranted(context)) {
-            AppLogger.w("Engine", "WRITE_SECURE_SETTINGS missing. Cannot start degradation.")
-            return
-        }
-
         EngineBridge.triggerManualSoftLanding()
-        AppLogger.i("Engine", "Parent triggered degradation sequence")
-
-        degradationJob?.cancel()
-        degradationJob = viewModelScope.launch(Dispatchers.Main) {
-            val profile = uiState.value.activeProfile
-            val durationMinutes = profile.transitionDurationMinutes.coerceAtLeast(1)
-            val durationMs = durationMinutes * 60 * 1000L
-            val startTime = System.currentTimeMillis()
-
-            AppLogger.i("Engine", "Degradation loop started for ${durationMinutes}m (${durationMs}ms)")
-
-            var elapsedMs = 0L
-            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
-            val maxVolume = audioManager?.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC) ?: 15
-
-            while (elapsedMs < durationMs && isActive) {
-                val progress = elapsedMs.toFloat() / durationMs.toFloat()
-                val saturationPercent = ((1.0f - progress) * 100).toInt().coerceIn(0, 100)
-
-                // Smooth gradual hardware/daltonizer desaturation
-                GrayscaleManager.setSaturationLevel(context, saturationPercent)
-
-                // Audio Volume Reduction
-                var currentVolPercent = 1.0f
-                if (profile.enableAudioFade && audioManager != null) {
-                    val targetVol = ((1.0f - progress) * maxVolume).toInt().coerceIn(0, maxVolume)
-                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, targetVol, 0)
-                    currentVolPercent = if (maxVolume > 0) targetVol.toFloat() / maxVolume.toFloat() else 0f
-                }
-
-                val remainingMs = durationMs - elapsedMs
-                EngineBridge.updateStatus(
-                    EngineStatusData(
-                        state = EngineState.SOFT_LANDING_TRANSITION,
-                        timeRemainingMs = remainingMs,
-                        currentSaturation = (saturationPercent / 100f),
-                        currentBlurRadius = 0,
-                        currentFps = 60,
-                        currentTouchDelayMs = 0L,
-                        currentVolumePercent = currentVolPercent,
-                        activeProfile = profile
-                    )
-                )
-
-                _isGrayscaleActive.value = GrayscaleManager.isGrayscaleActive(context)
-
-                kotlinx.coroutines.delay(500)
-                elapsedMs = System.currentTimeMillis() - startTime
-            }
-
-            if (isActive) {
-                GrayscaleManager.setSaturationLevel(context, 0)
-                GrayscaleManager.setGrayscaleEnabled(context, true)
-                if (profile.enableAudioFade && audioManager != null) {
-                    audioManager.setStreamVolume(android.media.AudioManager.STREAM_MUSIC, 0, 0)
-                }
-
-                EngineBridge.updateStatus(
-                    EngineStatusData(
-                        state = EngineState.LOCKED_OUT,
-                        timeRemainingMs = 0L,
-                        currentSaturation = 0.0f,
-                        currentBlurRadius = 0,
-                        currentFps = 60,
-                        currentTouchDelayMs = 0L,
-                        currentVolumePercent = 0.0f,
-                        activeProfile = profile
-                    )
-                )
-                _isGrayscaleActive.value = true
-                AppLogger.i("Engine", "Degradation transition completed. Display 100% grayscale.")
-            }
-        }
+        AppLogger.i("Engine", "Parent triggered degradation sequence via EngineBridge")
     }
 
     fun triggerImmediateSoftLanding() {
-        // Overload for background service triggers
         EngineBridge.triggerManualSoftLanding()
     }
 
     fun abortCurrentTransition(context: Context) {
-        degradationJob?.cancel()
-        degradationJob = null
-
         EngineBridge.abortTransition()
-        GrayscaleManager.setSaturationLevel(context, 100)
-        GrayscaleManager.setGrayscaleEnabled(context, false)
+        if (GrayscaleManager.isPermissionGranted(context)) {
+            GrayscaleManager.setSaturationLevel(context, 100)
+            GrayscaleManager.setGrayscaleEnabled(context, false)
+        }
 
         EngineBridge.updateStatus(
             EngineStatusData(
@@ -329,7 +247,7 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             )
         )
         _isGrayscaleActive.value = false
-        AppLogger.w("Engine", "Parent aborted degradation. Restored 100% full color display.")
+        AppLogger.w("Engine", "Parent aborted degradation. Restored full settings.")
     }
 
     fun abortCurrentTransition() {
@@ -361,7 +279,6 @@ private data class DataTuple(
 private data class PermissionsTuple(
     val hasOverlay: Boolean,
     val hasAccessibility: Boolean,
-    val hasScreenCapture: Boolean,
     val hasWriteSecureSettings: Boolean,
     val isGrayscaleActive: Boolean
 )

@@ -10,11 +10,14 @@ data class RestrictionProfileEntity(
     val profileName: String,
     val transitionDurationMinutes: Int = 2,
     val curveType: String = "LINEAR", // LINEAR, EXPONENTIAL, SIGMOIDAL
-    val enableColorDesaturation: Boolean = true,  // System-wide native Grayscale
-    val maxBlurRadius: Int = 0,                    // Disabled (0px)
-    val enableFrameThrottling: Boolean = false,    // Disabled
-    val enableTouchDelay: Boolean = false,         // Disabled
-    val minFpsFloor: Int = 60,                     // 60 FPS normal
-    val maxTouchDelayMs: Long = 0L,                // 0ms delay
-    val enableAudioFade: Boolean = true            // Audio Volume Reduction
+    val enableColorDesaturation: Boolean = false, // System-wide native Grayscale (disabled by default)
+    val enableOverlayGraying: Boolean = false,    // Visual screen overlay veil (disabled by default)
+    val overlayColorHex: String = "#808080",      // Customizable overlay color (default: Neutral Gray)
+    val overlayMaxAlpha: Float = 0.70f,           // Customizable overlay visibility/max opacity (0.10 to 1.00)
+    val maxBlurRadius: Int = 0,                   // Blur radius in px (0 = off, up to 80 px)
+    val enableFrameThrottling: Boolean = false,   // Screen Lagging / Frame Throttling (disabled by default)
+    val enableTouchDelay: Boolean = true,         // Gentle Touch Slowdown
+    val minFpsFloor: Int = 30,                    // 30 FPS floor (less aggressive when enabled)
+    val maxTouchDelayMs: Long = 400L,             // 400ms maximum touch delay
+    val enableAudioFade: Boolean = true           // Audio Volume Reduction
 )
