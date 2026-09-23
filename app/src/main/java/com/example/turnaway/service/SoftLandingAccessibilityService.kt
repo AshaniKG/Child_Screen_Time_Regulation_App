@@ -35,6 +35,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var frameThrottlingController: FrameThrottlingController
     private lateinit var cpuFrameThrottlingController: com.example.turnaway.engine.CpuFrameThrottlingController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
+    private lateinit var networkThrottlingController: com.example.turnaway.engine.NetworkThrottlingController
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionJob: Job? = null
@@ -193,6 +194,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
             frameThrottlingController = FrameThrottlingController(this, overlayManager)
             cpuFrameThrottlingController = com.example.turnaway.engine.CpuFrameThrottlingController(this)
             touchDelayQueueManager = TouchDelayQueueManager(this)
+            networkThrottlingController = com.example.turnaway.engine.NetworkThrottlingController(this)
             
             var gesturePath = android.graphics.Path()
             var gestureStartTime = 0L
@@ -362,8 +364,15 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 if (::cpuFrameThrottlingController.isInitialized) {
                     cpuFrameThrottlingController.stopThrottling()
                 }
+                if (::networkThrottlingController.isInitialized) {
+                    networkThrottlingController.stopThrottling()
+                }
                 touchDelayQueueManager.setTouchDelay(0L)
                 updateOverlayTouchableState(false)
+
+                if (profile.enableNetworkThrottling && ::networkThrottlingController.isInitialized) {
+                    networkThrottlingController.startThrottling()
+                }
 
                 EngineBridge.updateStatus(
                     EngineStatusData(
@@ -374,6 +383,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         currentFps = 60,
                         currentTouchDelayMs = 0L,
                         currentVolumePercent = if (maxVolume > 0) savedVolume.toFloat() / maxVolume.toFloat() else 1.0f,
+                        isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
                         activeProfile = profile
                     )
                 )
@@ -437,6 +447,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             currentFps = currentFps,
                             currentTouchDelayMs = currentTouchDelay,
                             currentVolumePercent = currentVolPercent,
+                            isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
                             activeProfile = profile
                         )
                     )
@@ -481,6 +492,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             currentFps = if (profile.enableFrameThrottling) profile.minFpsFloor else 60,
                             currentTouchDelayMs = if (profile.enableTouchDelay) profile.maxTouchDelayMs else 0L,
                             currentVolumePercent = 0.0f,
+                            isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
                             activeProfile = profile
                         )
                     )
@@ -515,6 +527,9 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         // 3. Immediately clear touch delay and disable touch interception
         touchDelayQueueManager.setTouchDelay(0L)
         updateOverlayTouchableState(false)
+        if (::networkThrottlingController.isInitialized) {
+            networkThrottlingController.stopThrottling()
+        }
 
         // 4. Restore normal audio volume
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager

@@ -40,6 +40,7 @@ fun EngineStatusCard(
     activeProfile: RestrictionProfileEntity,
     currentTouchDelayMs: Long,
     currentVolumePercent: Float,
+    isNetworkThrottled: Boolean = false,
     transitionDurationMinutes: Int = 2,
     onDurationChange: (Int) -> Unit = {},
     onTriggerManualLanding: () -> Unit,
@@ -55,6 +56,7 @@ fun EngineStatusCard(
         buildList {
             if (activeProfile.enableAudioFade) add("🔊 Volume Fade")
             if (activeProfile.enableTouchDelay) add("👆 Touch Delay")
+            if (activeProfile.enableNetworkThrottling) add("🌐 Network Throttling")
             if (activeProfile.enableColorDesaturation) add("🎨 System Grayscale")
             if (activeProfile.enableOverlayGraying) add("🎭 Overlay Veil (${(activeProfile.overlayMaxAlpha * 100).toInt()}%)")
             if (activeProfile.enableFrameThrottling) add("⚡ Screen Lag")
@@ -288,6 +290,9 @@ fun EngineStatusCard(
                             }
                             if (activeProfile.enableTouchDelay) {
                                 MetricColumn("Touch Delay", "${currentTouchDelayMs}ms")
+                            }
+                            if (activeProfile.enableNetworkThrottling) {
+                                MetricColumn("Network", if (isNetworkThrottled) "Throttled (5s)" else "Normal")
                             }
                         }
                     }

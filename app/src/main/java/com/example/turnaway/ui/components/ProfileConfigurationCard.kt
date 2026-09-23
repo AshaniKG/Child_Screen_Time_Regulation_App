@@ -19,6 +19,7 @@ import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.FilterBAndW
 import androidx.compose.material.icons.outlined.Layers
 import androidx.compose.material.icons.outlined.Speed
+import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material3.*
@@ -71,6 +72,7 @@ fun ProfileConfigurationCard(
     var enableTouchSlowdown by remember { mutableStateOf(profile.enableTouchDelay) }
     var touchDelayMs by remember { mutableFloatStateOf(profile.maxTouchDelayMs.toFloat()) }
     var enableAudioFade by remember { mutableStateOf(profile.enableAudioFade) }
+    var enableNetworkThrottling by remember { mutableStateOf(profile.enableNetworkThrottling) }
     var curveTypeStr by remember { mutableStateOf(profile.curveType) }
 
     var isSavedRecently by remember { mutableStateOf(false) }
@@ -88,6 +90,7 @@ fun ProfileConfigurationCard(
         enableTouchSlowdown = profile.enableTouchDelay
         touchDelayMs = profile.maxTouchDelayMs.toFloat()
         enableAudioFade = profile.enableAudioFade
+        enableNetworkThrottling = profile.enableNetworkThrottling
         curveTypeStr = profile.curveType
     }
 
@@ -513,6 +516,29 @@ fun ProfileConfigurationCard(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
+            // 8. Network Throttling
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.NetworkCheck,
+                    contentDescription = null,
+                    modifier = Modifier.padding(end = 12.dp),
+                    tint = MaterialTheme.colorScheme.primary
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(text = "Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                    Text(text = "Throttle network for 5s once every 1–2 minutes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Switch(
+                    checked = enableNetworkThrottling,
+                    onCheckedChange = { enableNetworkThrottling = it }
+                )
+            }
+
+            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
+
             // 8. Wind-Down Style
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -558,7 +584,8 @@ fun ProfileConfigurationCard(
                         minFpsFloor = minFpsFloor.toInt(),
                         enableTouchDelay = enableTouchSlowdown,
                         maxTouchDelayMs = touchDelayMs.toLong(),
-                        enableAudioFade = enableAudioFade
+                        enableAudioFade = enableAudioFade,
+                        enableNetworkThrottling = enableNetworkThrottling
                     )
                     onProfileUpdated(updated)
 

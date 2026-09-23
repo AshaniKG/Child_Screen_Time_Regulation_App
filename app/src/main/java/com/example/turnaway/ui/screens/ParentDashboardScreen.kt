@@ -198,6 +198,7 @@ fun ParentDashboardScreen(
                             activeProfile = uiState.activeProfile,
                             currentTouchDelayMs = uiState.currentTouchDelayMs,
                             currentVolumePercent = uiState.currentVolumePercent,
+                            isNetworkThrottled = uiState.isNetworkThrottled,
                             transitionDurationMinutes = uiState.activeProfile.transitionDurationMinutes,
                             onDurationChange = { minutes -> viewModel.setCustomTransitionDuration(minutes) },
                             onTriggerManualLanding = {

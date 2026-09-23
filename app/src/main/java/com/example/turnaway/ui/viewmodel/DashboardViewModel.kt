@@ -65,6 +65,7 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             currentFps = status.currentFps,
             currentTouchDelayMs = status.currentTouchDelayMs,
             currentVolumePercent = status.currentVolumePercent,
+            isNetworkThrottled = status.isNetworkThrottled,
             recentSessionLogs = dataTuple.sessionLogs,
             hasOverlayPermission = perms.hasOverlay,
             hasAccessibilityPermission = perms.hasAccessibility,

@@ -18,6 +18,7 @@ data class DashboardUiState(
     val currentFps: Int = 60,
     val currentTouchDelayMs: Long = 0L,
     val currentVolumePercent: Float = 1.0f,
+    val isNetworkThrottled: Boolean = false,
     val recentSessionLogs: List<SessionLogEntity> = emptyList(),
     val hasOverlayPermission: Boolean = false,
     val hasAccessibilityPermission: Boolean = false,

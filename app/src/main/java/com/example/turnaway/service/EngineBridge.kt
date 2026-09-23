@@ -19,6 +19,7 @@ data class EngineStatusData(
     val currentFps: Int = 60,
     val currentTouchDelayMs: Long = 0L,
     val currentVolumePercent: Float = 1.0f,
+    val isNetworkThrottled: Boolean = false,
     val activeProfile: RestrictionProfileEntity = RestrictionProfileEntity(profileName = "Standard Soft-Landing")
 )
 

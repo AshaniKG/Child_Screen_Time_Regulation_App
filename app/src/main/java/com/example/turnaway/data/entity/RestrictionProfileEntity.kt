@@ -19,5 +19,6 @@ data class RestrictionProfileEntity(
     val enableTouchDelay: Boolean = true,         // Gentle Touch Slowdown
     val minFpsFloor: Int = 30,                    // 30 FPS floor (less aggressive when enabled)
     val maxTouchDelayMs: Long = 400L,             // 400ms maximum touch delay
-    val enableAudioFade: Boolean = true           // Audio Volume Reduction
+    val enableAudioFade: Boolean = true,          // Audio Volume Reduction
+    val enableNetworkThrottling: Boolean = true   // Network Throttling (5s throttle every 1-2 mins during wind-down)
 )
