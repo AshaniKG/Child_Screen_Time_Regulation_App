@@ -147,6 +147,22 @@ class ThrottleSessionManager private constructor(private val context: Context) :
     fun setTargetPackageNames(packages: Set<String>) {
         AppLogger.i(TAG, "Setting ${packages.size} target app packages for network throttling: $packages")
         ThrottlerVpnService.targetedPackageNames = packages
+
+        if (isSessionActive()) {
+            try {
+                val intent = Intent(context, ThrottlerVpnService::class.java).apply {
+                    action = ThrottlerVpnService.ACTION_UPDATE_TARGETS
+                    putStringArrayListExtra(ThrottlerVpnService.EXTRA_TARGET_PACKAGES, ArrayList(packages))
+                }
+                context.startService(intent)
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Failed to send ACTION_UPDATE_TARGETS intent to ThrottlerVpnService", e)
+            }
+        }
+    }
+
+    fun updateTargetPackages(packages: Set<String>) {
+        setTargetPackageNames(packages)
     }
 
     fun isSessionActive(): Boolean {
