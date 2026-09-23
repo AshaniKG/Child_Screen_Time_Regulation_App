@@ -260,6 +260,42 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         // No-op (frame throttling removed)
     }
 
+    private fun isPackageExcluded(pkg: String): Boolean {
+        if (pkg.isBlank()) return true
+        if (pkg == packageName) return true
+        if (pkg == "com.android.systemui" || pkg == "com.android.settings" || pkg == "android") return true
+
+        try {
+            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            val defaultDialer = telecomManager?.defaultDialerPackage
+            if (!defaultDialer.isNullOrBlank() && pkg == defaultDialer) return true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error checking default dialer package", e)
+        }
+
+        try {
+            val homeIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_HOME)
+            }
+            val launcherInfo = packageManager.resolveActivity(homeIntent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            val launcherPkg = launcherInfo?.activityInfo?.packageName
+            if (!launcherPkg.isNullOrBlank() && pkg == launcherPkg) return true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error checking launcher package", e)
+        }
+
+        return false
+    }
+
+    private fun enforceAppLockoutIfRestricted(pkg: String) {
+        if (isPackageExcluded(pkg)) return
+
+        if (targetedPackages.contains(pkg)) {
+            AppLogger.w(TAG, "Restricted app launch intercepted in LOCKED_OUT state: $pkg. Executing GLOBAL_ACTION_HOME.")
+            performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+    }
+
     private fun observeBridgeAndDatabase() {
         serviceScope.launch {
             try {
@@ -449,6 +485,11 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         )
                     )
 
+                    // Transition End Trigger: Eject immediately if active app is in restricted set
+                    currentForegroundPackage?.let { fgPkg ->
+                        enforceAppLockoutIfRestricted(fgPkg)
+                    }
+
                     showTimeExceededNotification()
 
                     saveSessionMetrics(
@@ -557,6 +598,14 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     currentForegroundPackage = pkg
                     AppLogger.i(TAG, "Foreground package changed to: $pkg (inTargetSet=$isTarget)")
                     evaluateAppTargeting()
+                }
+            }
+
+            // Check if app closure / re-launch lockout is active in LOCKED_OUT state
+            if (!pkg.isNullOrBlank()) {
+                val currentEngineState = EngineBridge.engineStatus.value.state
+                if (currentEngineState == EngineState.LOCKED_OUT) {
+                    enforceAppLockoutIfRestricted(pkg)
                 }
             }
         }
