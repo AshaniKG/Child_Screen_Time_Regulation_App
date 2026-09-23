@@ -14,11 +14,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.BlurOn
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.FilterBAndW
 import androidx.compose.material.icons.outlined.Layers
-import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.TouchApp
 import androidx.compose.material.icons.automirrored.outlined.VolumeOff
@@ -65,10 +63,6 @@ fun ProfileConfigurationCard(
     var enableOverlay by remember { mutableStateOf(profile.enableOverlayGraying) }
     var selectedOverlayHex by remember { mutableStateOf(profile.overlayColorHex) }
     var overlayAlpha by remember { mutableFloatStateOf(profile.overlayMaxAlpha) }
-    var enableBlur by remember { mutableStateOf(profile.maxBlurRadius > 0) }
-    var blurIntensity by remember { mutableFloatStateOf(if (profile.maxBlurRadius > 0) profile.maxBlurRadius.toFloat() else 20f) }
-    var enableFrameThrottling by remember { mutableStateOf(profile.enableFrameThrottling) }
-    var minFpsFloor by remember { mutableFloatStateOf(profile.minFpsFloor.toFloat()) }
     var enableTouchSlowdown by remember { mutableStateOf(profile.enableTouchDelay) }
     var touchDelayMs by remember { mutableFloatStateOf(profile.maxTouchDelayMs.toFloat()) }
     var enableAudioFade by remember { mutableStateOf(profile.enableAudioFade) }
@@ -83,10 +77,6 @@ fun ProfileConfigurationCard(
         enableOverlay = profile.enableOverlayGraying
         selectedOverlayHex = profile.overlayColorHex
         overlayAlpha = profile.overlayMaxAlpha
-        enableBlur = profile.maxBlurRadius > 0
-        blurIntensity = if (profile.maxBlurRadius > 0) profile.maxBlurRadius.toFloat() else 20f
-        enableFrameThrottling = profile.enableFrameThrottling
-        minFpsFloor = profile.minFpsFloor.toFloat()
         enableTouchSlowdown = profile.enableTouchDelay
         touchDelayMs = profile.maxTouchDelayMs.toFloat()
         enableAudioFade = profile.enableAudioFade
@@ -335,123 +325,6 @@ fun ProfileConfigurationCard(
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
-            // 4. Screen Blur & Softening (Up to 80 px)
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.BlurOn,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 12.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Screen Blur & Softening",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = "Gradually blur and soften the screen (up to 80 px)",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                    Switch(
-                        checked = enableBlur,
-                        onCheckedChange = { enableBlur = it }
-                    )
-                }
-                AnimatedVisibility(visible = enableBlur) {
-                    Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "Blur Intensity (up to 80 px)",
-                                style = MaterialTheme.typography.labelMedium
-                            )
-                            val intensityLabel = when (blurIntensity.toInt()) {
-                                in 1..20 -> "Mild (${blurIntensity.toInt()} px)"
-                                in 21..50 -> "Medium (${blurIntensity.toInt()} px)"
-                                in 51..79 -> "Heavy (${blurIntensity.toInt()} px)"
-                                else -> "Maximum (80 px)"
-                            }
-                            Text(
-                                text = intensityLabel,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Slider(
-                            value = blurIntensity,
-                            onValueChange = { blurIntensity = it },
-                            valueRange = 1f..80f,
-                            steps = 78
-                        )
-                        Text(
-                            text = "Highest blur reaches ${blurIntensity.toInt()} px (maximum 80 px) at the end of wind-down.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
-            // 5. Screen Stutter & Frame Slowdown
-            Column {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.Speed,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 12.dp)
-                    )
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "Screen Stutter & Frame Slowdown", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                        Text(text = "Gradually drops visual framerate to discourage gaming", style = MaterialTheme.typography.bodySmall)
-                    }
-                    Switch(
-                        checked = enableFrameThrottling,
-                        onCheckedChange = { enableFrameThrottling = it }
-                    )
-                }
-                AnimatedVisibility(visible = enableFrameThrottling) {
-                    Column(modifier = Modifier.padding(start = 36.dp, top = 8.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(text = "Framerate Floor", style = MaterialTheme.typography.labelMedium)
-                            val fpsLabel = when {
-                                minFpsFloor <= 8f -> "Heavy Stutter (${minFpsFloor.toInt()} FPS)"
-                                minFpsFloor <= 15f -> "Moderate Lag (${minFpsFloor.toInt()} FPS)"
-                                else -> "Mild Jitter (${minFpsFloor.toInt()} FPS)"
-                            }
-                            Text(text = fpsLabel, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
-                        Slider(
-                            value = minFpsFloor,
-                            onValueChange = { minFpsFloor = it },
-                            valueRange = 5f..30f,
-                            steps = 4
-                        )
-                    }
-                }
-            }
-
-            HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
-
             // 6. Gentle Touch Slowdown
             Column {
                 Row(
@@ -579,9 +452,6 @@ fun ProfileConfigurationCard(
                         enableOverlayGraying = enableOverlay,
                         overlayColorHex = selectedOverlayHex,
                         overlayMaxAlpha = overlayAlpha,
-                        maxBlurRadius = if (enableBlur) blurIntensity.toInt().coerceIn(1, 80) else 0,
-                        enableFrameThrottling = enableFrameThrottling,
-                        minFpsFloor = minFpsFloor.toInt(),
                         enableTouchDelay = enableTouchSlowdown,
                         maxTouchDelayMs = touchDelayMs.toLong(),
                         enableAudioFade = enableAudioFade,

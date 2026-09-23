@@ -14,8 +14,6 @@ data class DashboardUiState(
     val currentEngineState: EngineState = EngineState.MONITORING,
     val timeRemainingInPhaseMs: Long = 0L,
     val currentSaturation: Float = 1.0f,
-    val currentBlurRadius: Int = 0,
-    val currentFps: Int = 60,
     val currentTouchDelayMs: Long = 0L,
     val currentVolumePercent: Float = 1.0f,
     val isNetworkThrottled: Boolean = false,

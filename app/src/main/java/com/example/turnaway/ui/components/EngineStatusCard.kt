@@ -59,8 +59,6 @@ fun EngineStatusCard(
             if (activeProfile.enableNetworkThrottling) add("🌐 Network Throttling")
             if (activeProfile.enableColorDesaturation) add("🎨 System Grayscale")
             if (activeProfile.enableOverlayGraying) add("🎭 Overlay Veil (${(activeProfile.overlayMaxAlpha * 100).toInt()}%)")
-            if (activeProfile.enableFrameThrottling) add("⚡ Screen Lag")
-            if (activeProfile.maxBlurRadius > 0) add("🌫 Blur (${activeProfile.maxBlurRadius}px)")
         }
     }
 
@@ -368,8 +366,7 @@ fun EngineStatusCard(
                                 if (activeProfile.enableTouchDelay) EnforcedLimitBadge("Touch: Delayed")
                                 if (activeProfile.enableColorDesaturation) EnforcedLimitBadge("Grayscale: 100%")
                                 if (activeProfile.enableOverlayGraying) EnforcedLimitBadge("Overlay: ${(activeProfile.overlayMaxAlpha * 100).toInt()}%")
-                                if (activeProfile.maxBlurRadius > 0) EnforcedLimitBadge("Blur: ${activeProfile.maxBlurRadius}px")
-                                if (activeProfile.enableFrameThrottling) EnforcedLimitBadge("Lag: ${activeProfile.minFpsFloor} FPS")
+                                if (activeProfile.enableNetworkThrottling) EnforcedLimitBadge("Network: Throttled")
                             }
                         }
                     }

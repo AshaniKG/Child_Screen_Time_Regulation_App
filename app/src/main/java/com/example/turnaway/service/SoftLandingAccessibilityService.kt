@@ -20,7 +20,6 @@ import com.example.turnaway.data.entity.SessionLogEntity
 import com.example.turnaway.engine.ColorDesaturationController
 import com.example.turnaway.engine.DecayCurveCalculator
 import com.example.turnaway.engine.DecayCurveType
-import com.example.turnaway.engine.FrameThrottlingController
 import com.example.turnaway.engine.TouchDelayQueueManager
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
@@ -32,8 +31,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: WindowManager
     private lateinit var overlayView: View
     private lateinit var desaturationController: ColorDesaturationController
-    private lateinit var frameThrottlingController: FrameThrottlingController
-    private lateinit var cpuFrameThrottlingController: com.example.turnaway.engine.CpuFrameThrottlingController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
     private lateinit var networkThrottlingController: com.example.turnaway.engine.NetworkThrottlingController
 
@@ -191,8 +188,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
             overlayManager.addView(overlayView, layoutParams)
 
             desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
-            frameThrottlingController = FrameThrottlingController(this, overlayManager)
-            cpuFrameThrottlingController = com.example.turnaway.engine.CpuFrameThrottlingController(this)
             touchDelayQueueManager = TouchDelayQueueManager(this)
             networkThrottlingController = com.example.turnaway.engine.NetworkThrottlingController(this)
             
@@ -262,24 +257,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private var targetedPackages: Set<String> = emptySet()
 
     private fun evaluateAppTargeting() {
-        if (!::frameThrottlingController.isInitialized) return
-        val currentPkg = currentForegroundPackage
-        val isExcluded = currentPkg == null ||
-                currentPkg == packageName ||
-                currentPkg == "com.android.systemui" ||
-                currentPkg == "com.android.settings" ||
-                currentPkg.contains("launcher")
-
-        val isTargeted = if (targetedPackages.isEmpty()) {
-            !isExcluded
-        } else {
-            !isExcluded && targetedPackages.contains(currentPkg)
-        }
-        AppLogger.d(TAG, "evaluateAppTargeting: pkg=$currentPkg, isTargeted=$isTargeted, targetedCount=${targetedPackages.size}")
-        frameThrottlingController.setTargetAppForeground(isTargeted)
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.setTargetAppForeground(isTargeted)
-        }
+        // No-op (frame throttling removed)
     }
 
     private fun observeBridgeAndDatabase() {
@@ -360,10 +338,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 desaturationController.resetAll()
 
                 // Initial baseline state
-                frameThrottlingController.stopThrottling()
-                if (::cpuFrameThrottlingController.isInitialized) {
-                    cpuFrameThrottlingController.stopThrottling()
-                }
                 if (::networkThrottlingController.isInitialized) {
                     networkThrottlingController.stopThrottling()
                 }
@@ -379,8 +353,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         state = EngineState.SOFT_LANDING_TRANSITION,
                         timeRemainingMs = durationMs,
                         currentSaturation = 1.0f,
-                        currentBlurRadius = 0,
-                        currentFps = 60,
                         currentTouchDelayMs = 0L,
                         currentVolumePercent = if (maxVolume > 0) savedVolume.toFloat() / maxVolume.toFloat() else 1.0f,
                         isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
@@ -394,18 +366,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     val progress = (elapsedMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                     val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
 
-                    // 1. Smooth gradual System Grayscale, Overlay Veil, and Blur
+                    // 1. Smooth gradual System Grayscale and Overlay Veil
                     val saturationFactor = if (profile.enableColorDesaturation) (1.0f - decay).coerceIn(0.0f, 1.0f) else 1.0f
                     val overlayProgress = if (profile.enableOverlayGraying) decay else 0f
-                    val currentBlur = if (profile.maxBlurRadius > 0) ((profile.maxBlurRadius * decay).toInt().coerceIn(0, profile.maxBlurRadius)) else 0
                     desaturationController.updateVisualEffects(
                         enableSystemGrayscale = profile.enableColorDesaturation,
                         saturationFactor = saturationFactor,
                         enableOverlay = profile.enableOverlayGraying,
                         overlayProgress = overlayProgress,
                         overlayColorHex = profile.overlayColorHex,
-                        overlayMaxAlpha = profile.overlayMaxAlpha,
-                        blurRadiusPx = currentBlur.toFloat()
+                        overlayMaxAlpha = profile.overlayMaxAlpha
                     )
 
                     // 2. Audio Volume Reduction (gradually fades down to 0)
@@ -414,18 +384,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         val targetVol = ((1.0f - decay) * savedVolume).toInt().coerceIn(0, maxVolume)
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
                         currentVolPercent = if (maxVolume > 0) targetVol.toFloat() / maxVolume.toFloat() else 0f
-                    }
-
-                    // 3. Screen Lagging / Frame Throttling (gradually drop FPS from 60 down to minFpsFloor)
-                    val currentFps = if (profile.enableFrameThrottling) {
-                        val fpsDrop = ((60 - profile.minFpsFloor) * decay).toInt()
-                        (60 - fpsDrop).coerceIn(profile.minFpsFloor, 60)
-                    } else {
-                        60
-                    }
-                    frameThrottlingController.setTargetFps(currentFps)
-                    if (::cpuFrameThrottlingController.isInitialized) {
-                        cpuFrameThrottlingController.setTargetFps(currentFps)
                     }
 
                     // 4. Gentle Touch Delay (gradually increase latency from 0ms up to maxTouchDelayMs)
@@ -443,8 +401,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             state = EngineState.SOFT_LANDING_TRANSITION,
                             timeRemainingMs = remainingMs,
                             currentSaturation = saturationFactor,
-                            currentBlurRadius = currentBlur,
-                            currentFps = currentFps,
                             currentTouchDelayMs = currentTouchDelay,
                             currentVolumePercent = currentVolPercent,
                             isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
@@ -459,24 +415,17 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 if (isActive) {
                     AppLogger.w(TAG, "Time limit exceeded! Screen is 100% grayscale, throttled, muted.")
 
-                    // Final state at end of duration: keep 100% native system grayscale flip, but remove visual overlay veil and blur
+                    // Final state at end of duration: keep 100% native system grayscale flip, but remove visual overlay veil
                     desaturationController.updateVisualEffects(
                         enableSystemGrayscale = profile.enableColorDesaturation,
                         saturationFactor = 0.0f,
                         enableOverlay = false,
                         overlayProgress = 0.0f,
                         overlayColorHex = profile.overlayColorHex,
-                        overlayMaxAlpha = profile.overlayMaxAlpha,
-                        blurRadiusPx = 0f
+                        overlayMaxAlpha = profile.overlayMaxAlpha
                     )
                     if (profile.enableAudioFade && audioManager != null) {
                         audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-                    }
-                    if (profile.enableFrameThrottling) {
-                        frameThrottlingController.setTargetFps(profile.minFpsFloor)
-                        if (::cpuFrameThrottlingController.isInitialized) {
-                            cpuFrameThrottlingController.setTargetFps(profile.minFpsFloor)
-                        }
                     }
                     if (profile.enableTouchDelay) {
                         touchDelayQueueManager.setTouchDelay(profile.maxTouchDelayMs)
@@ -488,8 +437,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             state = EngineState.LOCKED_OUT,
                             timeRemainingMs = 0L,
                             currentSaturation = 0.0f,
-                            currentBlurRadius = 0,
-                            currentFps = if (profile.enableFrameThrottling) profile.minFpsFloor else 60,
                             currentTouchDelayMs = if (profile.enableTouchDelay) profile.maxTouchDelayMs else 0L,
                             currentVolumePercent = 0.0f,
                             isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
@@ -515,14 +462,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private fun abortTransition() {
         transitionJob?.cancel()
 
-        // 1. Immediately restore full color display, remove overlay veil and blur
+        // 1. Immediately restore full color display and remove overlay veil
         desaturationController.resetAll()
-
-        // 2. Immediately stop frame throttling and screen lagging
-        frameThrottlingController.stopThrottling()
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.stopThrottling()
-        }
 
         // 3. Immediately clear touch delay and disable touch interception
         touchDelayQueueManager.setTouchDelay(0L)
@@ -547,8 +488,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 state = EngineState.MONITORING,
                 timeRemainingMs = 0L,
                 currentSaturation = 1.0f,
-                currentBlurRadius = 0,
-                currentFps = 60,
                 currentTouchDelayMs = 0L,
                 currentVolumePercent = if (maxVolume > 0) restoreVol.toFloat() / maxVolume.toFloat() else 1.0f,
                 activeProfile = activeProfile
@@ -624,11 +563,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         AppLogger.i(TAG, "Accessibility Service destroyed")
-        if (::frameThrottlingController.isInitialized) {
-            frameThrottlingController.release()
-        }
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.release()
+        if (::networkThrottlingController.isInitialized) {
+            networkThrottlingController.release()
         }
         if (::overlayView.isInitialized) {
             try {

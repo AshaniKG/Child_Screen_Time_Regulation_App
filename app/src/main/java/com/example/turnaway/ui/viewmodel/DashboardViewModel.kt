@@ -61,8 +61,6 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             currentEngineState = status.state,
             timeRemainingInPhaseMs = status.timeRemainingMs,
             currentSaturation = status.currentSaturation,
-            currentBlurRadius = status.currentBlurRadius,
-            currentFps = status.currentFps,
             currentTouchDelayMs = status.currentTouchDelayMs,
             currentVolumePercent = status.currentVolumePercent,
             isNetworkThrottled = status.isNetworkThrottled,
@@ -240,8 +238,6 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
                 state = EngineState.MONITORING,
                 timeRemainingMs = 0L,
                 currentSaturation = 1.0f,
-                currentBlurRadius = 0,
-                currentFps = 60,
                 currentTouchDelayMs = 0L,
                 currentVolumePercent = 1.0f,
                 activeProfile = uiState.value.activeProfile

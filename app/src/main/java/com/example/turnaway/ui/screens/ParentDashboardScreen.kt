@@ -30,7 +30,6 @@ import com.example.turnaway.ui.components.EngineStatusCard
 import com.example.turnaway.ui.components.GrayscalePermissionDialog
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
-import com.example.turnaway.ui.components.TargetAppsCard
 import com.example.turnaway.ui.viewmodel.DashboardViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -222,17 +221,6 @@ fun ParentDashboardScreen(
                         ProfileConfigurationCard(
                             profile = uiState.activeProfile,
                             onProfileUpdated = { updated -> viewModel.saveProfile(updated) }
-                        )
-
-                        // Selective regulated applications
-                        TargetAppsCard(
-                            targetApps = uiState.targetApps,
-                            onToggleAppTarget = { pkg, isTargeted ->
-                                viewModel.toggleAppTarget(pkg, isTargeted)
-                            },
-                            onSelectAll = { selectAll ->
-                                viewModel.setAllAppsTargeted(selectAll)
-                            }
                         )
 
                         // Bedtime schedule
