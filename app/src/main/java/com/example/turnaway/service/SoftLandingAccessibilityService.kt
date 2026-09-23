@@ -283,6 +283,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     dao.getTargetedApps().collect { apps ->
                         targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
                         AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps: $targetedPackages")
+                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setTargetPackageNames(targetedPackages)
                         evaluateAppTargeting()
                     }
                 }
@@ -341,11 +342,15 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 if (::networkThrottlingController.isInitialized) {
                     networkThrottlingController.stopThrottling()
                 }
+                com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
                 touchDelayQueueManager.setTouchDelay(0L)
                 updateOverlayTouchableState(false)
 
-                if (profile.enableNetworkThrottling && ::networkThrottlingController.isInitialized) {
-                    networkThrottlingController.startThrottling()
+                if (profile.enableNetworkThrottling) {
+                    if (::networkThrottlingController.isInitialized) {
+                        networkThrottlingController.startThrottling()
+                    }
+                    com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
                 }
 
                 EngineBridge.updateStatus(
@@ -471,6 +476,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         if (::networkThrottlingController.isInitialized) {
             networkThrottlingController.stopThrottling()
         }
+        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
         // 4. Restore normal audio volume
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager

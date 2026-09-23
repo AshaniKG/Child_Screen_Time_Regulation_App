@@ -402,7 +402,7 @@ fun ProfileConfigurationCard(
                 )
                 Column(modifier = Modifier.weight(1f)) {
                     Text(text = "Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    Text(text = "Throttle network for 5s once every 1–2 minutes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(text = "5s network drop once every 60 seconds", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Switch(
                     checked = enableNetworkThrottling,

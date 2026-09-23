@@ -28,8 +28,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.turnaway.ui.components.DisengagementAnalyticsCard
 import com.example.turnaway.ui.components.EngineStatusCard
 import com.example.turnaway.ui.components.GrayscalePermissionDialog
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
+import com.example.turnaway.ui.components.TargetAppsCard
 import com.example.turnaway.ui.viewmodel.DashboardViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,6 +46,14 @@ fun ParentDashboardScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showGrayscaleDialog by remember { mutableStateOf(false) }
+
+    val vpnLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.checkPermissions(context)
@@ -220,7 +231,26 @@ fun ParentDashboardScreen(
                         // Wind-down profile configuration
                         ProfileConfigurationCard(
                             profile = uiState.activeProfile,
-                            onProfileUpdated = { updated -> viewModel.saveProfile(updated) }
+                            onProfileUpdated = { updated ->
+                                viewModel.saveProfile(updated)
+                                if (updated.enableNetworkThrottling) {
+                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                    if (vpnIntent != null) {
+                                        vpnLauncher.launch(vpnIntent)
+                                    }
+                                }
+                            }
+                        )
+
+                        // Selective regulated applications for network throttling
+                        TargetAppsCard(
+                            targetApps = uiState.targetApps,
+                            onToggleAppTarget = { pkg, isTargeted ->
+                                viewModel.toggleAppTarget(pkg, isTargeted)
+                            },
+                            onSelectAll = { selectAll ->
+                                viewModel.setAllAppsTargeted(selectAll)
+                            }
                         )
 
                         // Bedtime schedule
