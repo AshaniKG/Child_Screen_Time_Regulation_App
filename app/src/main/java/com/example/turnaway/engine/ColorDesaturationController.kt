@@ -56,7 +56,11 @@ class DesaturationOverlayView(context: Context) : View(context) {
             val g = Color.green(overlayColor)
             val b = Color.blue(overlayColor)
             overlayPaint.color = Color.argb(alpha, r, g, b)
-            canvas.drawRect(0f, 0f, width.toFloat(), height.toFloat(), overlayPaint)
+
+            val displayMetrics = resources.displayMetrics
+            val right = canvas.width.toFloat().coerceAtLeast(width.toFloat()).coerceAtLeast(displayMetrics.widthPixels.toFloat() * 2f)
+            val bottom = canvas.height.toFloat().coerceAtLeast(height.toFloat()).coerceAtLeast(displayMetrics.heightPixels.toFloat() * 2f)
+            canvas.drawRect(0f, 0f, right, bottom, overlayPaint)
         }
     }
 }
@@ -77,6 +81,8 @@ class ColorDesaturationController(
         return GrayscaleManager.isPermissionGranted(context)
     }
 
+    private var lastGrayscaleState: Boolean? = null
+
     /**
      * Updates visual effects (system grayscale & overlay veil).
      */
@@ -89,20 +95,17 @@ class ColorDesaturationController(
         overlayMaxAlpha: Float = 0.70f
     ) {
         // 1. System Grayscale (Native system display matrix via WRITE_SECURE_SETTINGS)
-        if (enableSystemGrayscale) {
-            val s = saturationFactor.coerceIn(0.0f, 1.0f)
-            val saturationPercent = (s * 100).toInt().coerceIn(0, 100)
-            GrayscaleManager.setSaturationLevel(context, saturationPercent)
-
-            if (s <= 0.001f) {
+        if (lastGrayscaleState != enableSystemGrayscale) {
+            lastGrayscaleState = enableSystemGrayscale
+            if (enableSystemGrayscale) {
+                val s = saturationFactor.coerceIn(0.0f, 1.0f)
+                val saturationPercent = (s * 100).toInt().coerceIn(0, 100)
+                GrayscaleManager.setSaturationLevel(context, saturationPercent)
                 GrayscaleManager.setGrayscaleEnabled(context, true)
             } else {
                 GrayscaleManager.setGrayscaleEnabled(context, false)
+                GrayscaleManager.setSaturationLevel(context, 100)
             }
-        } else {
-            // System grayscale disabled: ensure native color saturation is 100%
-            GrayscaleManager.setGrayscaleEnabled(context, false)
-            GrayscaleManager.setSaturationLevel(context, 100)
         }
 
         // 2. Visual Overlay Veil (Independent of grayscale, customizable color & opacity)
@@ -135,6 +138,7 @@ class ColorDesaturationController(
      * Resets all visual effects back to normal defaults.
      */
     fun resetAll() {
+        lastGrayscaleState = false
         GrayscaleManager.setGrayscaleEnabled(context, false)
         GrayscaleManager.setSaturationLevel(context, 100)
 

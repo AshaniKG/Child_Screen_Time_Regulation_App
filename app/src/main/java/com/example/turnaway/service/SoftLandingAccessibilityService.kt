@@ -33,13 +33,13 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var desaturationController: ColorDesaturationController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
     private lateinit var networkThrottlingController: com.example.turnaway.engine.NetworkThrottlingController
+    private lateinit var audioFadeManager: com.example.turnaway.engine.AudioFadeManager
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionJob: Job? = null
 
     private var activeProfile = RestrictionProfileEntity(profileName = "Standard Soft-Landing")
     private var isDispatchingGesture = false
-    private var savedVolume = 10
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -181,15 +181,22 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                         WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
             )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
 
             overlayManager.addView(overlayView, layoutParams)
 
             desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
             touchDelayQueueManager = TouchDelayQueueManager(this)
             networkThrottlingController = com.example.turnaway.engine.NetworkThrottlingController(this)
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            audioFadeManager = com.example.turnaway.engine.AudioFadeManager(this, audioManager)
             
             var gesturePath = android.graphics.Path()
             var gestureStartTime = 0L
@@ -364,32 +371,33 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                 val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-                val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: maxVolume
-                if (currentVol > 0) {
-                    savedVolume = currentVol
+
+                if (::audioFadeManager.isInitialized) {
+                    audioFadeManager.startFadeSession(durationMs, profile.enableAudioFade)
                 }
 
-                AppLogger.i(TAG, "Gradual degradation started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}, Baseline Vol: $savedVolume/$maxVolume")
+                AppLogger.i(TAG, "Gradual degradation started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}")
 
                 // Ensure initial clean display at start of degradation
                 desaturationController.resetAll()
 
                 // Initial baseline state
                 com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
-                touchDelayQueueManager.setTouchDelay(0L)
+                touchDelayQueueManager.resetQueue()
                 updateOverlayTouchableState(false)
 
                 if (profile.enableNetworkThrottling) {
                     com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
                 }
 
+                val initialAllowedVol = if (::audioFadeManager.isInitialized) audioFadeManager.getCurrentAllowedVolume(0L) else maxVolume
                 EngineBridge.updateStatus(
                     EngineStatusData(
                         state = EngineState.SOFT_LANDING_TRANSITION,
                         timeRemainingMs = durationMs,
                         currentSaturation = 1.0f,
                         currentTouchDelayMs = 0L,
-                        currentVolumePercent = if (maxVolume > 0) savedVolume.toFloat() / maxVolume.toFloat() else 1.0f,
+                        currentVolumePercent = if (maxVolume > 0) initialAllowedVol.toFloat() / maxVolume.toFloat() else 1.0f,
                         isNetworkThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value,
                         activeProfile = profile
                     )
@@ -401,29 +409,50 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     val progress = (elapsedMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
                     val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
 
-                    // 1. Smooth gradual System Grayscale and Overlay Veil
-                    val saturationFactor = if (profile.enableColorDesaturation) (1.0f - decay).coerceIn(0.0f, 1.0f) else 1.0f
-                    val overlayProgress = if (profile.enableOverlayGraying) decay else 0f
+                    // 1. System Grayscale (activates at midpoint 50%) and Overlay Veil
+                    val isGrayscaleActive = profile.enableColorDesaturation && DecayCurveCalculator.evaluateGrayscaleState(elapsedMs, durationMs)
+                    val saturationFactor = if (isGrayscaleActive) 0.0f else 1.0f
+
+                    val currentVeilAlpha = if (profile.enableOverlayGraying) {
+                        DecayCurveCalculator.calculateCurrentVeilAlpha(
+                            elapsedTransitionMs = elapsedMs,
+                            totalTransitionMs = durationMs,
+                            minVeilAlpha = 0.0f,
+                            maxVeilAlpha = profile.overlayMaxAlpha
+                        )
+                    } else {
+                        0.0f
+                    }
+                    val overlayProgressFactor = if (profile.overlayMaxAlpha > 0.0f) {
+                        (currentVeilAlpha / profile.overlayMaxAlpha).coerceIn(0.0f, 1.0f)
+                    } else {
+                        0.0f
+                    }
                     desaturationController.updateVisualEffects(
-                        enableSystemGrayscale = profile.enableColorDesaturation,
+                        enableSystemGrayscale = isGrayscaleActive,
                         saturationFactor = saturationFactor,
                         enableOverlay = profile.enableOverlayGraying,
-                        overlayProgress = overlayProgress,
+                        overlayProgress = overlayProgressFactor,
                         overlayColorHex = profile.overlayColorHex,
                         overlayMaxAlpha = profile.overlayMaxAlpha
                     )
 
-                    // 2. Audio Volume Reduction (gradually fades down to 0)
+                    // 2. Audio Volume Reduction (uniform linear fade down to 0)
                     var currentVolPercent = 1.0f
-                    if (profile.enableAudioFade && audioManager != null) {
-                        val targetVol = ((1.0f - decay) * savedVolume).toInt().coerceIn(0, maxVolume)
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
-                        currentVolPercent = if (maxVolume > 0) targetVol.toFloat() / maxVolume.toFloat() else 0f
+                    if (profile.enableAudioFade && ::audioFadeManager.isInitialized) {
+                        audioFadeManager.applyVolumeForElapsed(elapsedMs)
+                        val allowedVol = audioFadeManager.getCurrentAllowedVolume(elapsedMs)
+                        currentVolPercent = if (maxVolume > 0) allowedVol.toFloat() / maxVolume.toFloat() else 0f
                     }
 
-                    // 4. Gentle Touch Delay (gradually increase latency from 0ms up to maxTouchDelayMs)
+                    // 4. Touch Delay (accelerates linearly to peak by midpoint 50% and clamps)
                     val currentTouchDelay = if (profile.enableTouchDelay) {
-                        (profile.maxTouchDelayMs * decay).toLong().coerceIn(0L, profile.maxTouchDelayMs)
+                        DecayCurveCalculator.calculateCurrentTouchDelay(
+                            elapsedTransitionMs = elapsedMs,
+                            totalTransitionMs = durationMs,
+                            minLagMs = 0L,
+                            maxLagMs = profile.maxTouchDelayMs
+                        )
                     } else {
                         0L
                     }
@@ -450,17 +479,17 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 if (isActive) {
                     AppLogger.w(TAG, "Time limit exceeded! Screen is 100% grayscale, throttled, muted.")
 
-                    // Final state at end of duration: keep 100% native system grayscale flip, but remove visual overlay veil
+                    // Final state at end of duration: keep 100% native system grayscale flip and persist visual overlay veil at 100% opacity
                     desaturationController.updateVisualEffects(
                         enableSystemGrayscale = profile.enableColorDesaturation,
                         saturationFactor = 0.0f,
-                        enableOverlay = false,
-                        overlayProgress = 0.0f,
+                        enableOverlay = profile.enableOverlayGraying,
+                        overlayProgress = 1.0f,
                         overlayColorHex = profile.overlayColorHex,
                         overlayMaxAlpha = profile.overlayMaxAlpha
                     )
-                    if (profile.enableAudioFade && audioManager != null) {
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
+                    if (profile.enableAudioFade && ::audioFadeManager.isInitialized) {
+                        audioFadeManager.applyVolumeForElapsed(durationMs)
                     }
                     if (profile.enableTouchDelay) {
                         touchDelayQueueManager.setTouchDelay(profile.maxTouchDelayMs)
@@ -506,7 +535,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         desaturationController.resetAll()
 
         // 3. Immediately clear touch delay and disable touch interception
-        touchDelayQueueManager.setTouchDelay(0L)
+        touchDelayQueueManager.resetQueue()
         updateOverlayTouchableState(false)
         if (::networkThrottlingController.isInitialized) {
             networkThrottlingController.stopThrottling()
@@ -514,15 +543,17 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
         // 4. Restore normal audio volume
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-        val restoreVol = if (savedVolume > 0) savedVolume else (maxVolume * 0.7f).toInt().coerceIn(1, maxVolume)
-        if (activeProfile.enableAudioFade && audioManager != null) {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restoreVol, 0)
+        if (::audioFadeManager.isInitialized) {
+            audioFadeManager.stopAndRestoreVolume()
         }
 
         // 5. Restore normal status notification
         showMonitoringNotification()
+
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+        val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: maxVolume
+        val volPercent = if (maxVolume > 0) currentVol.toFloat() / maxVolume.toFloat() else 1.0f
 
         EngineBridge.updateStatus(
             EngineStatusData(
@@ -530,7 +561,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 timeRemainingMs = 0L,
                 currentSaturation = 1.0f,
                 currentTouchDelayMs = 0L,
-                currentVolumePercent = if (maxVolume > 0) restoreVol.toFloat() / maxVolume.toFloat() else 1.0f,
+                currentVolumePercent = volPercent,
                 activeProfile = activeProfile
             )
         )
@@ -561,12 +592,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val currentState = EngineBridge.engineStatus.value.state
-            if (currentState == EngineState.SOFT_LANDING_TRANSITION || currentState == EngineState.LOCKED_OUT) {
-                if (activeProfile.enableAudioFade) {
-                    AppLogger.w(TAG, "Blocked volume key press due to active soft-landing")
-                    return true // Consume the event to prevent volume change
+        val currentState = EngineBridge.engineStatus.value.state
+        if (currentState == EngineState.SOFT_LANDING_TRANSITION || currentState == EngineState.LOCKED_OUT) {
+            if (activeProfile.enableAudioFade) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_VOLUME_UP,
+                    KeyEvent.KEYCODE_VOLUME_DOWN,
+                    KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                        AppLogger.w(TAG, "Blocked volume key press (${event.keyCode}) due to active soft-landing")
+                        return true // Consume the event to prevent volume change
+                    }
                 }
             }
         }
@@ -612,6 +647,9 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         AppLogger.i(TAG, "Accessibility Service destroyed")
+        if (::audioFadeManager.isInitialized) {
+            audioFadeManager.stopAndRestoreVolume()
+        }
         if (::networkThrottlingController.isInitialized) {
             networkThrottlingController.release()
         }
