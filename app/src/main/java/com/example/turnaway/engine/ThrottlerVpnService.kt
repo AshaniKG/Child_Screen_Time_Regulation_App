@@ -41,18 +41,28 @@ class ThrottlerVpnService : VpnService() {
         private val bandwidthKbpsState = AtomicInteger(-1) // -1 for unlimited
 
         @Volatile
+        var instance: ThrottlerVpnService? = null
+
+        @Volatile
         var targetedPackageNames: Set<String> = emptySet()
 
         fun isRunning(): Boolean = isRunningState.get()
         fun isDropActive(): Boolean = isDropActiveState.get()
 
         fun setDropState(active: Boolean) {
-            isDropActiveState.set(active)
+            val wasActive = isDropActiveState.getAndSet(active)
+            AppLogger.i("ThrottlerVpnService", "setDropState: active=$active (was=$wasActive)")
+            instance?.applyDropState(active)
         }
 
         fun setBandwidthLimit(kbps: Int?) {
             bandwidthKbpsState.set(kbps ?: -1)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -70,13 +80,30 @@ class ThrottlerVpnService : VpnService() {
                 return START_NOT_STICKY
             }
             ACTION_UPDATE_TARGETS -> {
-                rebuildVpnTunnel()
+                if (isDropActiveState.get()) {
+                    rebuildVpnTunnel()
+                }
                 return START_STICKY
             }
             else -> {
+                isRunningState.set(true)
                 startForegroundVpnNotification()
-                setupAndStartVpnTunnel()
+                if (isDropActiveState.get()) {
+                    setupAndStartVpnTunnel()
+                }
                 return START_STICKY
+            }
+        }
+    }
+
+    fun applyDropState(active: Boolean) {
+        serviceScope.launch(Dispatchers.Main) {
+            if (active) {
+                AppLogger.w(TAG, "Engaging VPN network drop for ${targetedPackageNames.size} target apps")
+                setupAndStartVpnTunnel()
+            } else {
+                AppLogger.i(TAG, "Releasing VPN network drop; restoring normal app connectivity")
+                closeVpnInterfaceOnly()
             }
         }
     }
@@ -117,15 +144,9 @@ class ThrottlerVpnService : VpnService() {
     }
 
     private fun setupAndStartVpnTunnel() {
-        if (isRunningState.get()) {
-            rebuildVpnTunnel()
-            return
-        }
-
         val targets = targetedPackageNames
         if (targets.isEmpty()) {
             AppLogger.w(TAG, "0 target applications selected. VPN tunnel will not capture traffic until apps are selected.")
-            isRunningState.set(false)
             return
         }
 
@@ -139,7 +160,6 @@ class ThrottlerVpnService : VpnService() {
         if (targets.isEmpty()) {
             AppLogger.w(TAG, "0 target apps remaining after update. Closing VPN tunnel.")
             closeVpnInterfaceOnly()
-            isRunningState.set(false)
             return
         }
 
@@ -182,7 +202,6 @@ class ThrottlerVpnService : VpnService() {
             if (addedCount == 0) {
                 AppLogger.w(TAG, "No valid installed target applications to route. Pausing VPN interface.")
                 closeVpnInterfaceOnly()
-                isRunningState.set(false)
                 return
             }
 
@@ -190,94 +209,32 @@ class ThrottlerVpnService : VpnService() {
             if (newPfd == null) {
                 AppLogger.e(TAG, "Failed to establish new VPN TUN ParcelFileDescriptor")
                 closeVpnInterfaceOnly()
-                isRunningState.set(false)
                 return
             }
 
-            // Seamlessly swap old descriptor for new descriptor without dropping unrelated connections
+            // Seamlessly swap old descriptor for new descriptor
             closeVpnInterfaceOnly()
             vpnInterface = newPfd
-            isRunningState.set(true)
             AppLogger.i(TAG, "Strict per-app VPN tunnel established successfully for $addedCount apps!")
 
             startPacketForwardingLoop(newPfd)
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error building/establishing VPN interface", e)
             closeVpnInterfaceOnly()
-            isRunningState.set(false)
         }
     }
 
     private fun startPacketForwardingLoop(pfd: ParcelFileDescriptor) {
         forwardingJob?.cancel()
         forwardingJob = serviceScope.launch {
-            val inputStream = FileInputStream(pfd.fileDescriptor)
-            val outputStream = FileOutputStream(pfd.fileDescriptor)
-            val buffer = ByteArray(32768)
-
-            var lastRateLimitCheck = System.currentTimeMillis()
-            var bytesTransferredInWindow = 0L
-
             try {
-                while (isActive && isRunningState.get()) {
-                    // Check drop state
-                    if (isDropActiveState.get()) {
-                        // Drop packets completely during 5-second drop window
-                        delay(200)
-                        continue
-                    }
-
-                    // Bandwidth clamping / rate limiting calculation
-                    val limitKbps = bandwidthKbpsState.get()
-                    if (limitKbps in 1..1000) {
-                        val maxBytesPerSec = limitKbps * 1024 / 8
-                        val now = System.currentTimeMillis()
-                        if (now - lastRateLimitCheck >= 1000) {
-                            lastRateLimitCheck = now
-                            bytesTransferredInWindow = 0L
-                        }
-
-                        if (bytesTransferredInWindow >= maxBytesPerSec) {
-                            delay(50) // Inject latency delay to enforce bandwidth ceiling
-                            continue
-                        }
-                    }
-
-                    val available = withContext(Dispatchers.IO) {
-                        try {
-                            if (inputStream.available() > 0) inputStream.read(buffer) else 0
-                        } catch (e: Exception) {
-                            -1
-                        }
-                    }
-
-                    if (available > 0) {
-                        bytesTransferredInWindow += available
-                        // Packet forwarding loop
-                        withContext(Dispatchers.IO) {
-                            try {
-                                outputStream.write(buffer, 0, available)
-                            } catch (e: Exception) {
-                                // Socket write handling
-                            }
-                        }
-                    } else if (available < 0) {
-                        break
-                    } else {
-                        delay(20)
-                    }
+                while (isActive && isRunningState.get() && vpnInterface != null) {
+                    delay(200)
                 }
             } catch (e: CancellationException) {
                 AppLogger.d(TAG, "Packet forwarding loop cancelled")
             } catch (e: Exception) {
                 AppLogger.e(TAG, "Error in packet forwarding loop", e)
-            } finally {
-                withContext(NonCancellable) {
-                    try {
-                        inputStream.close()
-                        outputStream.close()
-                    } catch (e: Exception) {}
-                }
             }
         }
     }
@@ -308,6 +265,7 @@ class ThrottlerVpnService : VpnService() {
 
     override fun onDestroy() {
         super.onDestroy()
+        instance = null
         stopVpnSession()
         serviceScope.cancel()
     }

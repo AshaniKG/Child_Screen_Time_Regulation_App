@@ -212,6 +212,12 @@ fun ParentDashboardScreen(
                             transitionDurationMinutes = uiState.activeProfile.transitionDurationMinutes,
                             onDurationChange = { minutes -> viewModel.setCustomTransitionDuration(minutes) },
                             onTriggerManualLanding = {
+                                if (uiState.activeProfile.enableNetworkThrottling) {
+                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                    if (vpnIntent != null) {
+                                        vpnLauncher.launch(vpnIntent)
+                                    }
+                                }
                                 viewModel.triggerImmediateSoftLanding(context)
                                 if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
                                     showGrayscaleDialog = true

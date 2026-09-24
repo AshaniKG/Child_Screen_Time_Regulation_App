@@ -56,6 +56,7 @@ class ThrottleSessionManager private constructor(private val context: Context) :
         try {
             val intent = Intent(context, ThrottlerVpnService::class.java).apply {
                 action = ThrottlerVpnService.ACTION_START
+                putStringArrayListExtra(ThrottlerVpnService.EXTRA_TARGET_PACKAGES, ArrayList(ThrottlerVpnService.targetedPackageNames))
             }
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)

@@ -146,13 +146,7 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
                 }
 
                 val targetEntities = discoveredMap.map { (pkg, name) ->
-                    val isTargeted = currentMap[pkg]?.isTargeted
-                        ?: (pkg.contains("youtube", ignoreCase = true) ||
-                            pkg.contains("video", ignoreCase = true) ||
-                            pkg.contains("chrome", ignoreCase = true) ||
-                            pkg.contains("game", ignoreCase = true) ||
-                            pkg.contains("media", ignoreCase = true) ||
-                            pkg.contains("tiktok", ignoreCase = true))
+                    val isTargeted = currentMap[pkg]?.isTargeted ?: true
                     TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted)
                 }.sortedBy { it.appName.lowercase() }
 

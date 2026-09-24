@@ -375,17 +375,11 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 desaturationController.resetAll()
 
                 // Initial baseline state
-                if (::networkThrottlingController.isInitialized) {
-                    networkThrottlingController.stopThrottling()
-                }
                 com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
                 touchDelayQueueManager.setTouchDelay(0L)
                 updateOverlayTouchableState(false)
 
                 if (profile.enableNetworkThrottling) {
-                    if (::networkThrottlingController.isInitialized) {
-                        networkThrottlingController.startThrottling()
-                    }
                     com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
                 }
 
@@ -396,7 +390,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         currentSaturation = 1.0f,
                         currentTouchDelayMs = 0L,
                         currentVolumePercent = if (maxVolume > 0) savedVolume.toFloat() / maxVolume.toFloat() else 1.0f,
-                        isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
+                        isNetworkThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value,
                         activeProfile = profile
                     )
                 )
@@ -444,7 +438,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             currentSaturation = saturationFactor,
                             currentTouchDelayMs = currentTouchDelay,
                             currentVolumePercent = currentVolPercent,
-                            isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
+                            isNetworkThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value,
                             activeProfile = profile
                         )
                     )
@@ -480,7 +474,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             currentSaturation = 0.0f,
                             currentTouchDelayMs = if (profile.enableTouchDelay) profile.maxTouchDelayMs else 0L,
                             currentVolumePercent = 0.0f,
-                            isNetworkThrottled = if (::networkThrottlingController.isInitialized) networkThrottlingController.isCurrentlyThrottled() else false,
+                            isNetworkThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value,
                             activeProfile = profile
                         )
                     )
