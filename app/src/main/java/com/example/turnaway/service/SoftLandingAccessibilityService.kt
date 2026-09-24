@@ -33,7 +33,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var desaturationController: ColorDesaturationController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
     private lateinit var networkThrottlingController: com.example.turnaway.engine.NetworkThrottlingController
-    private lateinit var audioFadeManager: com.example.turnaway.engine.AudioFadeManager
+    private lateinit var mediaVolumeManager: com.example.turnaway.engine.MediaVolumeManager
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionJob: Job? = null
@@ -196,7 +196,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
             touchDelayQueueManager = TouchDelayQueueManager(this)
             networkThrottlingController = com.example.turnaway.engine.NetworkThrottlingController(this)
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-            audioFadeManager = com.example.turnaway.engine.AudioFadeManager(this, audioManager)
+            mediaVolumeManager = com.example.turnaway.engine.MediaVolumeManager(this, audioManager)
             
             var gesturePath = android.graphics.Path()
             var gestureStartTime = 0L
@@ -264,7 +264,29 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private var targetedPackages: Set<String> = emptySet()
 
     private fun evaluateAppTargeting() {
-        // No-op (frame throttling removed)
+        val pkg = currentForegroundPackage ?: return
+        if (isPackageExcluded(pkg)) return
+
+        val isTargeted = targetedPackages.contains(pkg)
+        val currentState = EngineBridge.engineStatus.value.state
+
+        AppLogger.d(TAG, "evaluateAppTargeting: pkg=$pkg, isTargeted=$isTargeted, state=$currentState")
+
+        if (isTargeted) {
+            when (currentState) {
+                EngineState.MONITORING -> {
+                    AppLogger.i(TAG, "Targeted app ($pkg) entered foreground during MONITORING. Starting Soft-Landing transition.")
+                    startTransitionWindow(activeProfile)
+                }
+                EngineState.SOFT_LANDING_TRANSITION -> {
+                    AppLogger.d(TAG, "Targeted app ($pkg) active in foreground during SOFT_LANDING_TRANSITION.")
+                }
+                EngineState.LOCKED_OUT -> {
+                    AppLogger.w(TAG, "Targeted app ($pkg) launched during LOCKED_OUT state. Enforcing lockout.")
+                    enforceAppLockoutIfRestricted(pkg)
+                }
+            }
+        }
     }
 
     private fun isPackageExcluded(pkg: String): Boolean {
@@ -372,8 +394,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                 val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
 
-                if (::audioFadeManager.isInitialized) {
-                    audioFadeManager.startFadeSession(durationMs, profile.enableAudioFade)
+                if (::mediaVolumeManager.isInitialized) {
+                    mediaVolumeManager.startFade(durationMs, profile.enableAudioFade)
                 }
 
                 AppLogger.i(TAG, "Gradual degradation started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}")
@@ -390,7 +412,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
                 }
 
-                val initialAllowedVol = if (::audioFadeManager.isInitialized) audioFadeManager.getCurrentAllowedVolume(0L) else maxVolume
+                val initialAllowedVol = if (::mediaVolumeManager.isInitialized) mediaVolumeManager.calculateCurrentTargetVolume(0L) else maxVolume
                 EngineBridge.updateStatus(
                     EngineStatusData(
                         state = EngineState.SOFT_LANDING_TRANSITION,
@@ -439,9 +461,9 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
                     // 2. Audio Volume Reduction (uniform linear fade down to 0)
                     var currentVolPercent = 1.0f
-                    if (profile.enableAudioFade && ::audioFadeManager.isInitialized) {
-                        audioFadeManager.applyVolumeForElapsed(elapsedMs)
-                        val allowedVol = audioFadeManager.getCurrentAllowedVolume(elapsedMs)
+                    if (profile.enableAudioFade && ::mediaVolumeManager.isInitialized) {
+                        mediaVolumeManager.applyVolumeForElapsed(elapsedMs)
+                        val allowedVol = mediaVolumeManager.calculateCurrentTargetVolume(elapsedMs)
                         currentVolPercent = if (maxVolume > 0) allowedVol.toFloat() / maxVolume.toFloat() else 0f
                     }
 
@@ -488,8 +510,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         overlayColorHex = profile.overlayColorHex,
                         overlayMaxAlpha = profile.overlayMaxAlpha
                     )
-                    if (profile.enableAudioFade && ::audioFadeManager.isInitialized) {
-                        audioFadeManager.applyVolumeForElapsed(durationMs)
+                    if (profile.enableAudioFade && ::mediaVolumeManager.isInitialized) {
+                        mediaVolumeManager.applyVolumeForElapsed(durationMs)
                     }
                     if (profile.enableTouchDelay) {
                         touchDelayQueueManager.setTouchDelay(profile.maxTouchDelayMs)
@@ -543,8 +565,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
         // 4. Restore normal audio volume
-        if (::audioFadeManager.isInitialized) {
-            audioFadeManager.stopAndRestoreVolume()
+        if (::mediaVolumeManager.isInitialized) {
+            mediaVolumeManager.onStopClicked()
         }
 
         // 5. Restore normal status notification
@@ -592,6 +614,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        if (::mediaVolumeManager.isInitialized && mediaVolumeManager.isFadingActive) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN,
+                KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                    AppLogger.w(TAG, "Blocked hardware volume key press (${event.keyCode}) due to active wind-down/lockout")
+                    return true // Consume event completely to prevent hardware volume changes & popup UI
+                }
+            }
+        }
         val currentState = EngineBridge.engineStatus.value.state
         if (currentState == EngineState.SOFT_LANDING_TRANSITION || currentState == EngineState.LOCKED_OUT) {
             if (activeProfile.enableAudioFade) {
@@ -599,8 +631,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     KeyEvent.KEYCODE_VOLUME_UP,
                     KeyEvent.KEYCODE_VOLUME_DOWN,
                     KeyEvent.KEYCODE_VOLUME_MUTE -> {
-                        AppLogger.w(TAG, "Blocked volume key press (${event.keyCode}) due to active soft-landing")
-                        return true // Consume the event to prevent volume change
+                        return true
                     }
                 }
             }
@@ -647,8 +678,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         AppLogger.i(TAG, "Accessibility Service destroyed")
-        if (::audioFadeManager.isInitialized) {
-            audioFadeManager.stopAndRestoreVolume()
+        if (::mediaVolumeManager.isInitialized) {
+            mediaVolumeManager.onStopClicked()
         }
         if (::networkThrottlingController.isInitialized) {
             networkThrottlingController.release()
