@@ -8,14 +8,14 @@ import java.util.UUID
 data class RestrictionProfileEntity(
     @PrimaryKey val id: String = UUID.randomUUID().toString(),
     val profileName: String,
-    val transitionDurationMinutes: Int = 2,
+    val transitionDurationMinutes: Int = 5,
     val curveType: String = "LINEAR", // LINEAR, EXPONENTIAL, SIGMOIDAL
-    val enableColorDesaturation: Boolean = false, // System-wide native Grayscale (disabled by default)
-    val enableOverlayGraying: Boolean = false,    // Visual screen overlay veil (disabled by default)
-    val overlayColorHex: String = "#808080",      // Customizable overlay color (default: Neutral Gray)
-    val overlayMaxAlpha: Float = 0.70f,           // Customizable overlay visibility/max opacity (0.10 to 1.00)
-    val enableTouchDelay: Boolean = true,         // Gentle Touch Slowdown
-    val maxTouchDelayMs: Long = 400L,             // 400ms maximum touch delay
-    val enableAudioFade: Boolean = true,          // Audio Volume Reduction
-    val enableNetworkThrottling: Boolean = true   // Network Throttling (5s throttle every 1-2 mins during wind-down)
+    val enableColorDesaturation: Boolean = true,  // System-wide native Grayscale (enabled by default)
+    val enableOverlayGraying: Boolean = true,     // Visual screen overlay veil (enabled by default)
+    val overlayColorHex: String = "#808080",       // Customizable overlay color (default: Neutral Gray)
+    val overlayMaxAlpha: Float = 0.70f,            // Customizable overlay visibility/max opacity (0.10 to 1.00)
+    val enableTouchDelay: Boolean = true,          // Gentle Touch Slowdown
+    val maxTouchDelayMs: Long = 400L,              // 400ms maximum touch delay
+    val enableAudioFade: Boolean = true,           // Audio Volume Reduction
+    val enableNetworkThrottling: Boolean = true    // Network Throttling
 )

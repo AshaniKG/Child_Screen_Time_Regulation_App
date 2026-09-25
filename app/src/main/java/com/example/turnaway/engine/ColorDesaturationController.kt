@@ -8,6 +8,7 @@ import android.view.View
 import android.view.WindowManager
 import com.example.turnaway.util.AppLogger
 import com.example.turnaway.util.GrayscaleManager
+import kotlin.math.abs
 
 /**
  * Overlay view that renders a visual color veil with customizable tint color and max opacity.
@@ -24,7 +25,8 @@ class DesaturationOverlayView(context: Context) : View(context) {
     }
 
     init {
-        setLayerType(LAYER_TYPE_HARDWARE, null)
+        // Use standard layer rendering to prevent offscreen GPU buffer allocation flicker on initial draw
+        setLayerType(LAYER_TYPE_NONE, null)
     }
 
     fun setOverlayConfig(
@@ -33,17 +35,28 @@ class DesaturationOverlayView(context: Context) : View(context) {
         color: Int,
         maxAlpha: Float
     ) {
-        this.overlayEnabled = enabled
-        this.overlayProgress = progress.coerceIn(0.0f, 1.0f)
-        this.overlayColor = color
-        this.overlayMaxAlpha = maxAlpha.coerceIn(0.05f, 1.0f)
-        invalidate()
+        val newProgress = progress.coerceIn(0.0f, 1.0f)
+        val newMaxAlpha = maxAlpha.coerceIn(0.05f, 1.0f)
+
+        if (this.overlayEnabled != enabled ||
+            abs(this.overlayProgress - newProgress) > 0.005f ||
+            this.overlayColor != color ||
+            abs(this.overlayMaxAlpha - newMaxAlpha) > 0.01f) {
+
+            this.overlayEnabled = enabled
+            this.overlayProgress = newProgress
+            this.overlayColor = color
+            this.overlayMaxAlpha = newMaxAlpha
+            invalidate()
+        }
     }
 
     fun clearAll() {
-        this.overlayEnabled = false
-        this.overlayProgress = 0f
-        invalidate()
+        if (this.overlayEnabled || this.overlayProgress > 0f) {
+            this.overlayEnabled = false
+            this.overlayProgress = 0f
+            invalidate()
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -52,6 +65,8 @@ class DesaturationOverlayView(context: Context) : View(context) {
         // Draw custom color veil if overlay is enabled
         if (overlayEnabled && overlayProgress > 0.001f) {
             val alpha = (overlayProgress * overlayMaxAlpha * 255).toInt().coerceIn(0, 255)
+            if (alpha <= 0) return
+
             val r = Color.red(overlayColor)
             val g = Color.green(overlayColor)
             val b = Color.blue(overlayColor)
@@ -95,16 +110,18 @@ class ColorDesaturationController(
         overlayMaxAlpha: Float = 0.70f
     ) {
         // 1. System Grayscale (Native system display matrix via WRITE_SECURE_SETTINGS)
-        if (lastGrayscaleState != enableSystemGrayscale) {
-            lastGrayscaleState = enableSystemGrayscale
-            if (enableSystemGrayscale) {
-                val s = saturationFactor.coerceIn(0.0f, 1.0f)
-                val saturationPercent = (s * 100).toInt().coerceIn(0, 100)
-                GrayscaleManager.setSaturationLevel(context, saturationPercent)
-                GrayscaleManager.setGrayscaleEnabled(context, true)
-            } else {
-                GrayscaleManager.setGrayscaleEnabled(context, false)
-                GrayscaleManager.setSaturationLevel(context, 100)
+        val currentSysGrayscale = GrayscaleManager.isGrayscaleActive(context)
+        if (enableSystemGrayscale) {
+            if (!currentSysGrayscale || lastGrayscaleState != true) {
+                lastGrayscaleState = true
+                val success = GrayscaleManager.setGrayscaleEnabled(context, true)
+                AppLogger.i(TAG, "Enabling system grayscale (target state: true, current: $currentSysGrayscale, success: $success)")
+            }
+        } else {
+            if (currentSysGrayscale || lastGrayscaleState != false) {
+                lastGrayscaleState = false
+                val success = GrayscaleManager.setGrayscaleEnabled(context, false)
+                AppLogger.i(TAG, "Disabling system grayscale (target state: false, current: $currentSysGrayscale, success: $success)")
             }
         }
 

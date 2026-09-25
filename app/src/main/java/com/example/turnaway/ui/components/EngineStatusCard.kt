@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.turnaway.data.entity.RestrictionProfileEntity
+import com.example.turnaway.engine.SessionState
 import com.example.turnaway.service.EngineState
 import com.example.turnaway.ui.theme.ErrorColor
 import com.example.turnaway.ui.theme.SuccessColor
@@ -35,23 +37,38 @@ import java.util.concurrent.TimeUnit
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EngineStatusCard(
+    sessionState: SessionState,
     engineState: EngineState,
-    timeRemainingMs: Long,
+    totalTimeRemainingMs: Long,
+    normalTimeRemainingMs: Long,
+    transitionTimeRemainingMs: Long,
     activeProfile: RestrictionProfileEntity,
     currentTouchDelayMs: Long,
     currentVolumePercent: Float,
     isNetworkThrottled: Boolean = false,
-    transitionDurationMinutes: Int = 2,
-    onDurationChange: (Int) -> Unit = {},
-    onTriggerManualLanding: () -> Unit,
-    onEmergencyAbort: () -> Unit,
+    initialTotalUsageMinutes: Int = 30,
+    initialTransitionMinutes: Int = 5,
+    onStartSession: (totalUsageMinutes: Int, transitionMinutes: Int) -> Unit,
+    onStopSession: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var selectedDuration by remember(transitionDurationMinutes) {
-        mutableIntStateOf(transitionDurationMinutes)
+    var selectedTotalUsage by remember(initialTotalUsageMinutes) {
+        mutableIntStateOf(initialTotalUsageMinutes.coerceIn(15, 120))
+    }
+    var selectedTransition by remember(initialTransitionMinutes) {
+        mutableIntStateOf(initialTransitionMinutes.coerceIn(5, 15).coerceAtMost(selectedTotalUsage))
     }
 
-    // Build list of active features from profile
+    // Ensure transition duration never exceeds total usage time
+    LaunchedEffect(selectedTotalUsage) {
+        if (selectedTransition > selectedTotalUsage) {
+            selectedTransition = selectedTotalUsage.coerceAtMost(15)
+        }
+    }
+
+    val isSessionActive = sessionState != SessionState.IDLE
+
+    // Active features badges
     val activeFeatures = remember(activeProfile) {
         buildList {
             if (activeProfile.enableAudioFade) add("🔊 Volume Fade")
@@ -69,10 +86,11 @@ fun EngineStatusCard(
             .animateContentSize(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (engineState == EngineState.LOCKED_OUT) {
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
-            } else {
-                MaterialTheme.colorScheme.surfaceContainerLow
+            containerColor = when (sessionState) {
+                SessionState.COMPLETED_LOCKED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.6f)
+                SessionState.IN_TRANSITION -> MaterialTheme.colorScheme.surfaceContainerHigh
+                SessionState.NORMAL_USAGE -> MaterialTheme.colorScheme.surfaceContainerLow
+                SessionState.IDLE -> MaterialTheme.colorScheme.surfaceContainerLow
             }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -87,24 +105,26 @@ fun EngineStatusCard(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                StatusIndicator(engineState = engineState)
+                StatusIndicator(sessionState = sessionState, engineState = engineState)
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
-                        text = when (engineState) {
-                            EngineState.MONITORING -> "Ready"
-                            EngineState.SOFT_LANDING_TRANSITION -> "Degrading…"
-                            EngineState.LOCKED_OUT -> "Time Limit Exceeded!"
+                        text = when (sessionState) {
+                            SessionState.IDLE -> "Ready to Start Session"
+                            SessionState.NORMAL_USAGE -> "Phase 1: Normal Usage Active"
+                            SessionState.IN_TRANSITION -> "Phase 2: Wind-Down In Progress"
+                            SessionState.COMPLETED_LOCKED -> "Phase 3: Screen-Time Limit Reached!"
                         },
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
-                        color = if (engineState == EngineState.LOCKED_OUT) ErrorColor else MaterialTheme.colorScheme.onSurface
+                        color = if (sessionState == SessionState.COMPLETED_LOCKED) ErrorColor else MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = when (engineState) {
-                            EngineState.MONITORING -> "Sensory wind-down configured & ready"
-                            EngineState.SOFT_LANDING_TRANSITION -> "Gradually reducing sensory stimulation"
-                            EngineState.LOCKED_OUT -> "All enabled limits enforced at maximum"
+                        text = when (sessionState) {
+                            SessionState.IDLE -> "Configure total usage & wind-down duration"
+                            SessionState.NORMAL_USAGE -> "Device operates with 100% normal performance"
+                            SessionState.IN_TRANSITION -> "Sensory degradations active across transition duration"
+                            SessionState.COMPLETED_LOCKED -> "All enabled limits enforced at maximum until stopped"
                         },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -114,122 +134,209 @@ fun EngineStatusCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ─── READY STATE ───
-            AnimatedVisibility(
-                visible = engineState == EngineState.MONITORING,
-                enter = fadeIn() + expandVertically(),
-                exit = fadeOut() + shrinkVertically()
+            // ─── TIME PICKERS / SLIDERS (Always visible, disabled when session active) ───
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)
+                ),
+                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Column {
-                    // Customizable Time Limit Section
+                Column(modifier = Modifier.padding(14.dp)) {
+                    // 1. Allowed Usage Time Selector (15m to 120m)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Timer,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.Timer,
+                                contentDescription = null,
+                                tint = if (isSessionActive) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Allowed Usage Time:",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                         Text(
-                            text = "Time Limit: $selectedDuration minute${if (selectedDuration > 1) "s" else ""}",
+                            text = "${selectedTotalUsage} minutes",
                             style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    // Preset chips
-                    val presets = listOf(1, 2, 5, 10, 15, 30)
+                    val usagePresets = listOf(15, 30, 45, 60, 90, 120)
                     FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        presets.forEach { minutes ->
+                        usagePresets.forEach { minutes ->
                             FilterChip(
-                                selected = selectedDuration == minutes,
+                                selected = selectedTotalUsage == minutes,
                                 onClick = {
-                                    selectedDuration = minutes
-                                    onDurationChange(minutes)
+                                    if (!isSessionActive) selectedTotalUsage = minutes
                                 },
+                                enabled = !isSessionActive,
                                 label = { Text("${minutes}m") }
                             )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    // Duration Slider
                     Slider(
-                        value = selectedDuration.toFloat(),
-                        onValueChange = {
-                            selectedDuration = it.toInt()
-                            onDurationChange(it.toInt())
-                        },
-                        valueRange = 1f..60f,
-                        steps = 58
+                        value = selectedTotalUsage.toFloat(),
+                        onValueChange = { if (!isSessionActive) selectedTotalUsage = it.toInt() },
+                        valueRange = 15f..120f,
+                        steps = 104,
+                        enabled = !isSessionActive,
+                        modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Active Features Checklist (dynamic)
-                    if (activeFeatures.isNotEmpty()) {
-                        Text(
-                            text = "Active Gradual Features:",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        FlowRow(
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            activeFeatures.forEach { feature ->
-                                FeatureBadge(feature)
-                            }
-                        }
-                    } else {
-                        Text(
-                            text = "No wind-down features enabled. Enable features in Settings.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    Button(
-                        onClick = onTriggerManualLanding,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        enabled = activeFeatures.isNotEmpty()
+                    // 2. Transition Duration Selector (5m to 15m, <= totalUsage)
+                    val maxTransAllowed = selectedTotalUsage.coerceAtMost(15)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.Filled.HourglassTop,
+                                contentDescription = null,
+                                tint = if (isSessionActive) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Wind-Down Transition:",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                         Text(
-                            "Start Wind-Down ($selectedDuration min)",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp
+                            text = "${selectedTransition} minutes",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
                         )
                     }
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    val transPresets = listOf(5, 8, 10, 12, 15).filter { it <= maxTransAllowed }
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        transPresets.forEach { minutes ->
+                            FilterChip(
+                                selected = selectedTransition == minutes,
+                                onClick = {
+                                    if (!isSessionActive) selectedTransition = minutes
+                                },
+                                enabled = !isSessionActive,
+                                label = { Text("${minutes}m") }
+                            )
+                        }
+                    }
+
+                    Slider(
+                        value = selectedTransition.toFloat().coerceAtMost(maxTransAllowed.toFloat()),
+                        onValueChange = { if (!isSessionActive) selectedTransition = it.toInt().coerceAtMost(maxTransAllowed) },
+                        valueRange = 5f..(maxTransAllowed.toFloat().coerceAtLeast(5f)),
+                        steps = (maxTransAllowed - 5).coerceAtLeast(0),
+                        enabled = !isSessionActive && maxTransAllowed > 5,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
             }
 
-            // ─── TRANSITION IN PROGRESS ───
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // ─── PHASE 1: NORMAL USAGE DISPLAY ───
             AnimatedVisibility(
-                visible = engineState == EngineState.SOFT_LANDING_TRANSITION,
+                visible = sessionState == SessionState.NORMAL_USAGE,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
                 Column {
-                    val minutes = TimeUnit.MILLISECONDS.toMinutes(timeRemainingMs)
-                    val seconds = TimeUnit.MILLISECONDS.toSeconds(timeRemainingMs) % 60
+                    val totalMin = TimeUnit.MILLISECONDS.toMinutes(totalTimeRemainingMs)
+                    val totalSec = TimeUnit.MILLISECONDS.toSeconds(totalTimeRemainingMs) % 60
+                    val totalTimeString = String.format("%02d:%02d", totalMin, totalSec)
+
+                    val normMin = TimeUnit.MILLISECONDS.toMinutes(normalTimeRemainingMs)
+                    val normSec = TimeUnit.MILLISECONDS.toSeconds(normalTimeRemainingMs) % 60
+                    val normTimeString = String.format("%02d:%02d", normMin, normSec)
+
+                    Surface(
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Total Session Remaining:",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = totalTimeString,
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Wind-down starts in:",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Text(
+                                    text = normTimeString,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = WarningColor
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+            }
+
+            // ─── PHASE 2: IN TRANSITION DISPLAY ───
+            AnimatedVisibility(
+                visible = sessionState == SessionState.IN_TRANSITION,
+                enter = fadeIn() + expandVertically(),
+                exit = fadeOut() + shrinkVertically()
+            ) {
+                Column {
+                    val minutes = TimeUnit.MILLISECONDS.toMinutes(transitionTimeRemainingMs)
+                    val seconds = TimeUnit.MILLISECONDS.toSeconds(transitionTimeRemainingMs) % 60
                     val timeString = String.format("%02d:%02d", minutes, seconds)
 
                     Row(
@@ -238,7 +345,7 @@ fun EngineStatusCard(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "Time Remaining:",
+                            text = "Transition Remaining:",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Medium
                         )
@@ -246,16 +353,15 @@ fun EngineStatusCard(
                             text = timeString,
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
+                            color = WarningColor
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                    // Progress bar based on time elapsed
-                    val totalDurationMs = activeProfile.transitionDurationMinutes * 60 * 1000L
-                    val elapsedFraction = if (totalDurationMs > 0) {
-                        (1.0f - (timeRemainingMs.toFloat() / totalDurationMs.toFloat())).coerceIn(0f, 1f)
+                    val totalTransMs = selectedTransition * 60 * 1000L
+                    val elapsedFraction = if (totalTransMs > 0) {
+                        (1.0f - (transitionTimeRemainingMs.toFloat() / totalTransMs.toFloat())).coerceIn(0f, 1f)
                     } else 0f
 
                     LinearProgressIndicator(
@@ -268,13 +374,10 @@ fun EngineStatusCard(
                         trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                    // Simplified real-time metrics (only active features)
                     Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Row(
@@ -295,33 +398,13 @@ fun EngineStatusCard(
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(18.dp))
-
-                    Button(
-                        onClick = onEmergencyAbort,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = ErrorColor,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Icon(imageVector = Icons.Filled.Stop, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "Stop Degradation",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 15.sp
-                        )
-                    }
+                    Spacer(modifier = Modifier.height(14.dp))
                 }
             }
 
-            // ─── TIME LIMIT EXCEEDED (LOCKED OUT) ───
+            // ─── PHASE 3: COMPLETED LOCKOUT DISPLAY ───
             AnimatedVisibility(
-                visible = engineState == EngineState.LOCKED_OUT,
+                visible = sessionState == SessionState.COMPLETED_LOCKED,
                 enter = fadeIn() + expandVertically(),
                 exit = fadeOut() + shrinkVertically()
             ) {
@@ -343,7 +426,7 @@ fun EngineStatusCard(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "Screen-Time Limit Reached",
+                                    text = "00:00 - TIME LIMIT EXCEEDED",
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = ErrorColor
@@ -351,12 +434,11 @@ fun EngineStatusCard(
                             }
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "All enabled regulation features are enforced at maximum intensity. Tap the button below to stop restrictions and restore normal device behavior.",
+                                text = "All regulation limits are active at maximum intensity. Restricted apps are locked. Tap STOP to restore normal device operation.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(10.dp))
-                            // Dynamic enforced badges based on profile
                             FlowRow(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -370,34 +452,74 @@ fun EngineStatusCard(
                             }
                         }
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    // PROMINENT STOP BUTTON
-                    Button(
-                        onClick = onEmergencyAbort,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = ErrorColor,
-                            contentColor = Color.White
-                        ),
-                        elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+            // Active Features Badges Summary (in IDLE state)
+            if (sessionState == SessionState.IDLE) {
+                if (activeFeatures.isNotEmpty()) {
+                    Text(
+                        text = "Active Gradual Degradations:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
                     ) {
-                        Icon(
-                            imageVector = Icons.Filled.Stop,
-                            contentDescription = "Stop",
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = "STOP / RESTORE DEVICE",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
+                        activeFeatures.forEach { feature ->
+                            FeatureBadge(feature)
+                        }
                     }
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
+            // ─── DYNAMIC ACTION BUTTON (START / STOP) ───
+            if (sessionState == SessionState.IDLE) {
+                Button(
+                    onClick = { onStartSession(selectedTotalUsage, selectedTransition) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    enabled = activeFeatures.isNotEmpty(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(imageVector = Icons.Filled.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "START SESSION ($selectedTotalUsage min)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            } else {
+                Button(
+                    onClick = onStopSession,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = ErrorColor,
+                        contentColor = Color.White
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
+                ) {
+                    Icon(imageVector = Icons.Filled.Stop, contentDescription = "Stop", modifier = Modifier.size(24.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (sessionState == SessionState.COMPLETED_LOCKED) "STOP / RESTORE DEVICE" else "STOP SESSION",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
                 }
             }
         }
@@ -446,7 +568,7 @@ private fun EnforcedLimitBadge(text: String) {
 }
 
 @Composable
-fun StatusIndicator(engineState: EngineState) {
+fun StatusIndicator(sessionState: SessionState, engineState: EngineState) {
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
 
     val alpha by infiniteTransition.animateFloat(
@@ -459,13 +581,14 @@ fun StatusIndicator(engineState: EngineState) {
         label = "alpha"
     )
 
-    val color = when (engineState) {
-        EngineState.MONITORING -> SuccessColor
-        EngineState.SOFT_LANDING_TRANSITION -> WarningColor
-        EngineState.LOCKED_OUT -> ErrorColor
+    val color = when (sessionState) {
+        SessionState.IDLE -> SuccessColor
+        SessionState.NORMAL_USAGE -> SuccessColor
+        SessionState.IN_TRANSITION -> WarningColor
+        SessionState.COMPLETED_LOCKED -> ErrorColor
     }
 
-    val currentAlpha = if (engineState == EngineState.SOFT_LANDING_TRANSITION || engineState == EngineState.LOCKED_OUT) alpha else 1.0f
+    val currentAlpha = if (sessionState == SessionState.IN_TRANSITION || sessionState == SessionState.COMPLETED_LOCKED) alpha else 1.0f
 
     Box(
         modifier = Modifier

@@ -7,5 +7,5 @@ import androidx.room.PrimaryKey
 data class TargetAppEntity(
     @PrimaryKey val packageName: String,
     val appName: String,
-    val isTargeted: Boolean = true
+    val isTargeted: Boolean = false
 )

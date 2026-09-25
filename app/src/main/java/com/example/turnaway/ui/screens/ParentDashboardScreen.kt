@@ -203,27 +203,30 @@ fun ParentDashboardScreen(
                     0 -> {
                         // Engine status hero card
                         EngineStatusCard(
+                            sessionState = uiState.currentSessionState,
                             engineState = uiState.currentEngineState,
-                            timeRemainingMs = uiState.timeRemainingInPhaseMs,
+                            totalTimeRemainingMs = uiState.timeRemainingInPhaseMs,
+                            normalTimeRemainingMs = uiState.normalTimeRemainingMs,
+                            transitionTimeRemainingMs = uiState.transitionTimeRemainingMs,
                             activeProfile = uiState.activeProfile,
                             currentTouchDelayMs = uiState.currentTouchDelayMs,
                             currentVolumePercent = uiState.currentVolumePercent,
                             isNetworkThrottled = uiState.isNetworkThrottled,
-                            transitionDurationMinutes = uiState.activeProfile.transitionDurationMinutes,
-                            onDurationChange = { minutes -> viewModel.setCustomTransitionDuration(minutes) },
-                            onTriggerManualLanding = {
+                            initialTotalUsageMinutes = uiState.totalUsageMinutes,
+                            initialTransitionMinutes = uiState.transitionMinutes,
+                            onStartSession = { totalUsage, transition ->
                                 if (uiState.activeProfile.enableNetworkThrottling) {
                                     val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
                                     if (vpnIntent != null) {
                                         vpnLauncher.launch(vpnIntent)
                                     }
                                 }
-                                viewModel.triggerImmediateSoftLanding(context)
+                                viewModel.startSession(context, totalUsage, transition)
                                 if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
                                     showGrayscaleDialog = true
                                 }
                             },
-                            onEmergencyAbort = { viewModel.abortCurrentTransition(context) }
+                            onStopSession = { viewModel.stopSession(context) }
                         )
 
                         // Session insights
