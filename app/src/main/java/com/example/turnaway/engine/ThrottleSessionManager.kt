@@ -45,6 +45,24 @@ class ThrottleSessionManager private constructor(private val context: Context) :
         return VpnService.prepare(context)
     }
 
+    private fun ensureServiceRunning() {
+        if (!ThrottlerVpnService.isRunning()) {
+            try {
+                val intent = Intent(context, ThrottlerVpnService::class.java).apply {
+                    action = ThrottlerVpnService.ACTION_START
+                    putStringArrayListExtra(ThrottlerVpnService.EXTRA_TARGET_PACKAGES, ArrayList(ThrottlerVpnService.targetedPackageNames))
+                }
+                if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Failed to ensure ThrottlerVpnService is running", e)
+            }
+        }
+    }
+
     override fun startSession() {
         if (isSessionActiveState.getAndSet(true)) {
             AppLogger.d(TAG, "Network throttling session is already active")
@@ -52,21 +70,7 @@ class ThrottleSessionManager private constructor(private val context: Context) :
         }
 
         AppLogger.i(TAG, "Starting network throttling VPN session")
-
-        try {
-            val intent = Intent(context, ThrottlerVpnService::class.java).apply {
-                action = ThrottlerVpnService.ACTION_START
-                putStringArrayListExtra(ThrottlerVpnService.EXTRA_TARGET_PACKAGES, ArrayList(ThrottlerVpnService.targetedPackageNames))
-            }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to start ThrottlerVpnService", e)
-        }
-
+        ensureServiceRunning()
         startPeriodicDropTimer()
     }
 
@@ -102,21 +106,25 @@ class ThrottleSessionManager private constructor(private val context: Context) :
     }
 
     /**
-     * Runs periodic 5-second drop window once every 60 seconds during an active session.
+     * Runs periodic 5-second drop windows during an active wind-down transition.
+     * Starts with an early 15s delay (so 1-30m sessions experience early friction),
+     * then repeats every 45-60 seconds until session ends or lockout occurs.
      */
     private fun startPeriodicDropTimer() {
         dropTimerJob?.cancel()
         dropTimerJob = managerScope.launch {
             try {
+                // Initial delay of 15 seconds into wind-down
+                delay(15_000L)
+
                 while (isActive && isSessionActiveState.get()) {
-                    // Wait for 60 seconds interval
-                    AppLogger.d(TAG, "Waiting 60s until next network throttle drop window")
-                    delay(60_000L)
-
-                    if (!isActive || !isSessionActiveState.get()) break
-
                     // Trigger 5-second drop window
                     triggerTemporaryDrop(5000L)
+
+                    // Wait 45 seconds between throttle drops
+                    delay(45_000L)
+
+                    if (!isActive || !isSessionActiveState.get()) break
                 }
             } catch (e: CancellationException) {
                 AppLogger.d(TAG, "Periodic drop timer cancelled")
@@ -127,6 +135,7 @@ class ThrottleSessionManager private constructor(private val context: Context) :
     }
 
     override fun triggerTemporaryDrop(durationMs: Long) {
+        ensureServiceRunning()
         managerScope.launch {
             AppLogger.w(TAG, "Triggering temporary ${durationMs}ms network drop window...")
             _isDropActiveFlow.value = true
@@ -137,6 +146,23 @@ class ThrottleSessionManager private constructor(private val context: Context) :
             ThrottlerVpnService.setDropState(false)
             _isDropActiveFlow.value = false
             AppLogger.i(TAG, "Temporary network drop window ended")
+        }
+    }
+
+    /**
+     * Enforces continuous network drop on regulated apps during Phase 3 Lockout.
+     */
+    fun setLockoutThrottle(active: Boolean) {
+        if (active) {
+            ensureServiceRunning()
+            dropTimerJob?.cancel()
+            _isDropActiveFlow.value = true
+            ThrottlerVpnService.setDropState(true)
+            AppLogger.w(TAG, "Lockout throttle engaged (continuous network block on regulated apps)")
+        } else {
+            _isDropActiveFlow.value = false
+            ThrottlerVpnService.setDropState(false)
+            AppLogger.i(TAG, "Lockout throttle released")
         }
     }
 

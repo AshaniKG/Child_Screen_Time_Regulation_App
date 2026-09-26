@@ -53,16 +53,16 @@ fun EngineStatusCard(
     modifier: Modifier = Modifier
 ) {
     var selectedTotalUsage by remember(initialTotalUsageMinutes) {
-        mutableIntStateOf(initialTotalUsageMinutes.coerceIn(15, 120))
+        mutableIntStateOf(initialTotalUsageMinutes.coerceIn(1, 30))
     }
     var selectedTransition by remember(initialTransitionMinutes) {
-        mutableIntStateOf(initialTransitionMinutes.coerceIn(5, 15).coerceAtMost(selectedTotalUsage))
+        mutableIntStateOf(initialTransitionMinutes.coerceIn(1, selectedTotalUsage).coerceAtMost(selectedTotalUsage))
     }
 
     // Ensure transition duration never exceeds total usage time
     LaunchedEffect(selectedTotalUsage) {
         if (selectedTransition > selectedTotalUsage) {
-            selectedTransition = selectedTotalUsage.coerceAtMost(15)
+            selectedTransition = selectedTotalUsage
         }
     }
 
@@ -173,7 +173,7 @@ fun EngineStatusCard(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    val usagePresets = listOf(15, 30, 45, 60, 90, 120)
+                    val usagePresets = listOf(1, 5, 10, 15, 20, 30)
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -194,8 +194,8 @@ fun EngineStatusCard(
                     Slider(
                         value = selectedTotalUsage.toFloat(),
                         onValueChange = { if (!isSessionActive) selectedTotalUsage = it.toInt() },
-                        valueRange = 15f..120f,
-                        steps = 104,
+                        valueRange = 1f..30f,
+                        steps = 28,
                         enabled = !isSessionActive,
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -204,8 +204,8 @@ fun EngineStatusCard(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     Spacer(modifier = Modifier.height(10.dp))
 
-                    // 2. Transition Duration Selector (5m to 15m, <= totalUsage)
-                    val maxTransAllowed = selectedTotalUsage.coerceAtMost(15)
+                    // 2. Transition Duration Selector (1m to 30m, <= totalUsage)
+                    val maxTransAllowed = selectedTotalUsage
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -235,7 +235,7 @@ fun EngineStatusCard(
 
                     Spacer(modifier = Modifier.height(6.dp))
 
-                    val transPresets = listOf(5, 8, 10, 12, 15).filter { it <= maxTransAllowed }
+                    val transPresets = listOf(1, 2, 5, 10, 15, 30).filter { it <= maxTransAllowed }
                     FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -256,9 +256,9 @@ fun EngineStatusCard(
                     Slider(
                         value = selectedTransition.toFloat().coerceAtMost(maxTransAllowed.toFloat()),
                         onValueChange = { if (!isSessionActive) selectedTransition = it.toInt().coerceAtMost(maxTransAllowed) },
-                        valueRange = 5f..(maxTransAllowed.toFloat().coerceAtLeast(5f)),
-                        steps = (maxTransAllowed - 5).coerceAtLeast(0),
-                        enabled = !isSessionActive && maxTransAllowed > 5,
+                        valueRange = 1f..(maxTransAllowed.toFloat().coerceAtLeast(1f)),
+                        steps = (maxTransAllowed - 2).coerceAtLeast(0),
+                        enabled = !isSessionActive && maxTransAllowed > 1,
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

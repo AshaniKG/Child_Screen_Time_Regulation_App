@@ -140,11 +140,35 @@ class ThrottlerVpnService : VpnService() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
 
-        startForeground(2001, notification)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(2001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(2001, notification)
+        }
     }
 
     private fun setupAndStartVpnTunnel() {
-        val targets = targetedPackageNames
+        var targets = targetedPackageNames
+        if (targets.isEmpty()) {
+            // Attempt to load from database if not yet passed in memory
+            try {
+                val db = com.example.turnaway.data.db.SoftLandingDatabase.getDatabase(applicationContext)
+                val dbTargets: Set<String> = runBlocking(Dispatchers.IO) {
+                    try {
+                        db.softLandingDao().getTargetedPackageNamesList().toSet()
+                    } catch (e: Exception) {
+                        emptySet<String>()
+                    }
+                }
+                if (dbTargets.isNotEmpty()) {
+                    targetedPackageNames = dbTargets
+                    targets = dbTargets
+                }
+            } catch (e: Exception) {
+                AppLogger.d(TAG, "Database target lookup note: ${e.message}")
+            }
+        }
+
         if (targets.isEmpty()) {
             AppLogger.w(TAG, "0 target applications selected. VPN tunnel will not capture traffic until apps are selected.")
             return
@@ -175,14 +199,18 @@ class ThrottlerVpnService : VpnService() {
                 .addDnsServer("8.8.8.8")
                 .setMtu(1500)
 
-            // 1. Exclude TurnAway itself so our app maintains 100% full speed and avoids loops
+            // IPv6 address and route to prevent bypass on modern cellular & Wi-Fi networks
             try {
-                builder.addDisallowedApplication(packageName)
+                builder.addAddress("fd00:1:fd00:1::2", 64)
+                builder.addRoute("::", 0)
+                builder.addDnsServer("2001:4860:4860::8888")
             } catch (e: Exception) {
-                AppLogger.w(TAG, "Could not add self to disallowed applications", e.message)
+                AppLogger.d(TAG, "IPv6 route configuration note: ${e.message}")
             }
 
-            // 2. Strict Per-App Routing: Route ONLY selected target apps through TUN interface
+            // Strict Per-App Routing: Route ONLY selected target apps through TUN interface.
+            // NOTE: Do not call addDisallowedApplication alongside addAllowedApplication, as
+            // VpnService.Builder enforces that allowed and disallowed modes are mutually exclusive.
             var addedCount = 0
             val pm = packageManager
             for (pkg in targets) {
@@ -226,15 +254,25 @@ class ThrottlerVpnService : VpnService() {
 
     private fun startPacketForwardingLoop(pfd: ParcelFileDescriptor) {
         forwardingJob?.cancel()
-        forwardingJob = serviceScope.launch {
+        forwardingJob = serviceScope.launch(Dispatchers.IO) {
+            val buffer = ByteArray(32768)
+            val inputStream = FileInputStream(pfd.fileDescriptor)
             try {
                 while (isActive && isRunningState.get() && vpnInterface != null) {
-                    delay(200)
+                    val read = try {
+                        inputStream.read(buffer)
+                    } catch (e: Exception) {
+                        -1
+                    }
+                    if (read <= 0) {
+                        delay(20)
+                    }
+                    // Packets from regulated apps are drained and dropped (blackholed)
                 }
             } catch (e: CancellationException) {
                 AppLogger.d(TAG, "Packet forwarding loop cancelled")
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error in packet forwarding loop", e)
+                AppLogger.d(TAG, "Packet forwarding loop ended: ${e.message}")
             }
         }
     }

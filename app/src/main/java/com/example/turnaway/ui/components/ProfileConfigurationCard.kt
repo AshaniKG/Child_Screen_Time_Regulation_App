@@ -53,6 +53,8 @@ val OVERLAY_COLOR_PRESETS = listOf(
 fun ProfileConfigurationCard(
     profile: RestrictionProfileEntity,
     onProfileUpdated: (RestrictionProfileEntity) -> Unit,
+    regulatedAppsCount: Int = 0,
+    onTestThrottle: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -148,8 +150,8 @@ fun ProfileConfigurationCard(
                 Slider(
                     value = transitionDuration,
                     onValueChange = { transitionDuration = it },
-                    valueRange = 1f..60f,
-                    steps = 58
+                    valueRange = 1f..30f,
+                    steps = 28
                 )
             }
 
@@ -390,24 +392,60 @@ fun ProfileConfigurationCard(
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
             // 8. Network Throttling
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Outlined.NetworkCheck,
-                    contentDescription = null,
-                    modifier = Modifier.padding(end = 12.dp),
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = "Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
-                    Text(text = "5s network drop once every 60 seconds", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.NetworkCheck,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 12.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(text = "Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(
+                            text = if (enableNetworkThrottling && regulatedAppsCount > 0) {
+                                "5s drops every 45s on $regulatedAppsCount regulated apps (continuous block on lockout)"
+                            } else if (enableNetworkThrottling) {
+                                "⚠️ 0 regulated apps chosen. Select apps below to throttle."
+                            } else {
+                                "Regulate internet speed for selected apps during wind-down"
+                            },
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (enableNetworkThrottling && regulatedAppsCount == 0) {
+                                MaterialTheme.colorScheme.error
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+                    Switch(
+                        checked = enableNetworkThrottling,
+                        onCheckedChange = { enableNetworkThrottling = it }
+                    )
                 }
-                Switch(
-                    checked = enableNetworkThrottling,
-                    onCheckedChange = { enableNetworkThrottling = it }
-                )
+
+                if (enableNetworkThrottling && onTestThrottle != null) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedButton(
+                        onClick = onTestThrottle,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.NetworkCheck,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (regulatedAppsCount > 0) "Test 5s Network Drop ($regulatedAppsCount apps)" else "Select Apps Below to Test",
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                    }
+                }
             }
 
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))

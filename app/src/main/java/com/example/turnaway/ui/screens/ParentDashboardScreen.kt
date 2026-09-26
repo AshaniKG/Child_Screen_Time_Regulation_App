@@ -51,7 +51,13 @@ fun ParentDashboardScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
+            val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+            if (targets.isNotEmpty()) {
+                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+            }
+            if (uiState.currentSessionState != com.example.turnaway.engine.SessionState.IDLE) {
+                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
+            }
         }
     }
 
@@ -238,8 +244,25 @@ fun ParentDashboardScreen(
                     // ─── SETTINGS TAB ───
                     1 -> {
                         // Wind-down profile configuration
+                        val targetedCount = uiState.targetApps.count { it.isTargeted }
                         ProfileConfigurationCard(
                             profile = uiState.activeProfile,
+                            regulatedAppsCount = targetedCount,
+                            onTestThrottle = {
+                                val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                if (vpnIntent != null) {
+                                    vpnLauncher.launch(vpnIntent)
+                                } else {
+                                    val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+                                    if (targets.isEmpty()) {
+                                        android.widget.Toast.makeText(context, "Select at least 1 app in Regulated Apps below to test", android.widget.Toast.LENGTH_LONG).show()
+                                    } else {
+                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).triggerTemporaryDrop(5000L)
+                                        android.widget.Toast.makeText(context, "Testing 5-second network drop on ${targets.size} regulated apps…", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
                             onProfileUpdated = { updated ->
                                 viewModel.saveProfile(updated)
                                 if (updated.enableNetworkThrottling) {

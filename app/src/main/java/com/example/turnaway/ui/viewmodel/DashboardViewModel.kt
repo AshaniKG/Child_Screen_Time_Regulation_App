@@ -213,17 +213,22 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
     fun setCustomTransitionDuration(durationMinutes: Int) {
         val current = uiState.value.activeProfile
-        val updated = current.copy(transitionDurationMinutes = durationMinutes.coerceAtLeast(1))
+        val updated = current.copy(transitionDurationMinutes = durationMinutes.coerceIn(1, 30))
         saveProfile(updated)
         AppLogger.i("Configuration", "Updated transition duration to ${updated.transitionDurationMinutes} minutes")
     }
 
     fun startSession(context: Context, totalUsageMinutes: Int, transitionMinutes: Int) {
-        val total = totalUsageMinutes.coerceIn(15, 120)
-        val trans = transitionMinutes.coerceIn(5, 15).coerceAtMost(total)
+        val total = totalUsageMinutes.coerceIn(1, 30)
+        val trans = transitionMinutes.coerceIn(1, total).coerceAtMost(total)
 
         val currentProfile = uiState.value.activeProfile
         saveProfile(currentProfile.copy(transitionDurationMinutes = trans))
+
+        val targets = uiState.value.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+        if (targets.isNotEmpty()) {
+            com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+        }
 
         com.example.turnaway.engine.SessionStateManager.startSession(context, total, trans)
         EngineBridge.triggerStartSession(total, trans)

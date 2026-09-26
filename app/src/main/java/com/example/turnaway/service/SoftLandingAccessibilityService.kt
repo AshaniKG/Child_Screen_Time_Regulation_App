@@ -32,7 +32,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var overlayView: View
     private lateinit var desaturationController: ColorDesaturationController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
-    private lateinit var networkThrottlingController: com.example.turnaway.engine.NetworkThrottlingController
     private lateinit var mediaVolumeManager: com.example.turnaway.engine.MediaVolumeManager
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -195,7 +194,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
             desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
             touchDelayQueueManager = TouchDelayQueueManager(this)
-            networkThrottlingController = com.example.turnaway.engine.NetworkThrottlingController(this)
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             mediaVolumeManager = com.example.turnaway.engine.MediaVolumeManager(this, audioManager)
             
@@ -625,7 +623,10 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             updateOverlayTouchableState(true)
                         }
 
-                        val isThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value
+                        if (activeProfile.enableNetworkThrottling) {
+                            com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setLockoutThrottle(true)
+                        }
+                        val isThrottled = activeProfile.enableNetworkThrottling || com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value
 
                         val progressData = com.example.turnaway.engine.SessionProgress(
                             state = com.example.turnaway.engine.SessionState.COMPLETED_LOCKED,
@@ -682,9 +683,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         // 3. Immediately clear touch delay and disable touch interception
         touchDelayQueueManager.resetQueue()
         updateOverlayTouchableState(false)
-        if (::networkThrottlingController.isInitialized) {
-            networkThrottlingController.stopThrottling()
-        }
         com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
         // 4. Restore normal audio volume
@@ -806,9 +804,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         AppLogger.i(TAG, "Accessibility Service destroyed")
         if (::mediaVolumeManager.isInitialized) {
             mediaVolumeManager.onStopClicked()
-        }
-        if (::networkThrottlingController.isInitialized) {
-            networkThrottlingController.release()
         }
         if (::overlayView.isInitialized) {
             try {

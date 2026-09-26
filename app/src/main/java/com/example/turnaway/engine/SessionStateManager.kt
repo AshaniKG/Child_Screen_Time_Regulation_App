@@ -15,12 +15,12 @@ enum class SessionState {
 }
 
 data class SessionConfig(
-    val totalUsageMinutes: Int = 30,    // 15..120
-    val transitionMinutes: Int = 5      // 5..15
+    val totalUsageMinutes: Int = 30,    // 1..30
+    val transitionMinutes: Int = 5      // 1..30
 ) {
     init {
-        val total = totalUsageMinutes.coerceIn(15, 120)
-        val transition = transitionMinutes.coerceIn(5, 15).coerceAtMost(total)
+        val total = totalUsageMinutes.coerceIn(1, 30)
+        val transition = transitionMinutes.coerceIn(1, total).coerceAtMost(total)
         require(transition <= total) {
             "Transition duration cannot exceed total usage duration"
         }
@@ -68,14 +68,14 @@ object SessionStateManager {
 
     fun getSavedConfig(context: Context): SessionConfig {
         val prefs = getPrefs(context)
-        val total = prefs.getInt(KEY_TOTAL_USAGE_MIN, 30).coerceIn(15, 120)
-        val trans = prefs.getInt(KEY_TRANSITION_MIN, 5).coerceIn(5, 15).coerceAtMost(total)
+        val total = prefs.getInt(KEY_TOTAL_USAGE_MIN, 30).coerceIn(1, 30)
+        val trans = prefs.getInt(KEY_TRANSITION_MIN, 5).coerceIn(1, total).coerceAtMost(total)
         return SessionConfig(totalUsageMinutes = total, transitionMinutes = trans)
     }
 
     fun startSession(context: Context, totalUsageMinutes: Int, transitionMinutes: Int): SessionConfig {
-        val total = totalUsageMinutes.coerceIn(15, 120)
-        val trans = transitionMinutes.coerceIn(5, 15).coerceAtMost(total)
+        val total = totalUsageMinutes.coerceIn(1, 30)
+        val trans = transitionMinutes.coerceIn(1, total).coerceAtMost(total)
         val config = SessionConfig(totalUsageMinutes = total, transitionMinutes = trans)
         val now = System.currentTimeMillis()
 
