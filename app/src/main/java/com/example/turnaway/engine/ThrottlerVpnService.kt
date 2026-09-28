@@ -5,23 +5,24 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import android.telecom.TelecomManager
 import androidx.core.app.NotificationCompat
 import com.example.turnaway.MainActivity
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * On-device local VPN Service enforcing strict per-app routing via [VpnService.Builder.addAllowedApplication].
- * Only parent-selected target apps are captured by the TUN interface; all other apps and TurnAway
- * bypass the VPN completely and maintain normal internet performance.
+ * On-device system-wide local VPN Service enforcing mid-transition network throttling.
+ *
+ * All device traffic (except TurnAway and system dialer) is routed through the TUN interface.
+ * When [isDropActive] is true, payload packets are dropped (blackholed) for 10 seconds.
+ * When [isDropActive] is false, the TUN interface is closed/idle so normal system network
+ * traffic flows over native hardware interfaces with zero latency or performance penalty.
  */
 class ThrottlerVpnService : VpnService() {
 
@@ -33,18 +34,12 @@ class ThrottlerVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.example.turnaway.VPN_START"
         const val ACTION_STOP = "com.example.turnaway.VPN_STOP"
-        const val ACTION_UPDATE_TARGETS = "com.example.turnaway.VPN_UPDATE_TARGETS"
-        const val EXTRA_TARGET_PACKAGES = "EXTRA_TARGET_PACKAGES"
 
         private val isRunningState = AtomicBoolean(false)
         private val isDropActiveState = AtomicBoolean(false)
-        private val bandwidthKbpsState = AtomicInteger(-1) // -1 for unlimited
 
         @Volatile
         var instance: ThrottlerVpnService? = null
-
-        @Volatile
-        var targetedPackageNames: Set<String> = emptySet()
 
         fun isRunning(): Boolean = isRunningState.get()
         fun isDropActive(): Boolean = isDropActiveState.get()
@@ -53,10 +48,6 @@ class ThrottlerVpnService : VpnService() {
             val wasActive = isDropActiveState.getAndSet(active)
             AppLogger.i("ThrottlerVpnService", "setDropState: active=$active (was=$wasActive)")
             instance?.applyDropState(active)
-        }
-
-        fun setBandwidthLimit(kbps: Int?) {
-            bandwidthKbpsState.set(kbps ?: -1)
         }
     }
 
@@ -68,22 +59,10 @@ class ThrottlerVpnService : VpnService() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
 
-        // Check if package list is provided in intent extras
-        val packagesList = intent?.getStringArrayListExtra(EXTRA_TARGET_PACKAGES)
-        if (packagesList != null) {
-            targetedPackageNames = packagesList.toSet()
-        }
-
         when (action) {
             ACTION_STOP -> {
                 stopVpnSession()
                 return START_NOT_STICKY
-            }
-            ACTION_UPDATE_TARGETS -> {
-                if (isDropActiveState.get()) {
-                    rebuildVpnTunnel()
-                }
-                return START_STICKY
             }
             else -> {
                 isRunningState.set(true)
@@ -99,10 +78,10 @@ class ThrottlerVpnService : VpnService() {
     fun applyDropState(active: Boolean) {
         serviceScope.launch(Dispatchers.Main) {
             if (active) {
-                AppLogger.w(TAG, "Engaging VPN network drop for ${targetedPackageNames.size} target apps")
+                AppLogger.w(TAG, "Engaging system-wide network drop window (blackholing packets)")
                 setupAndStartVpnTunnel()
             } else {
-                AppLogger.i(TAG, "Releasing VPN network drop; restoring normal app connectivity")
+                AppLogger.i(TAG, "Releasing network drop window; restoring normal system connectivity")
                 closeVpnInterfaceOnly()
             }
         }
@@ -115,7 +94,7 @@ class ThrottlerVpnService : VpnService() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
-                "Network Throttling VPN",
+                "System-Wide Network Throttling VPN",
                 NotificationManager.IMPORTANCE_LOW
             )
             manager.createNotificationChannel(channel)
@@ -132,8 +111,8 @@ class ThrottlerVpnService : VpnService() {
         )
 
         val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Per-App Network Throttling Active")
-            .setContentText("Regulating network connectivity exclusively for selected applications.")
+            .setContentTitle("System-Wide Network Throttling Active")
+            .setContentText("Automated mid-transition network regulation active across device.")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
@@ -148,58 +127,16 @@ class ThrottlerVpnService : VpnService() {
     }
 
     private fun setupAndStartVpnTunnel() {
-        var targets = targetedPackageNames
-        if (targets.isEmpty()) {
-            // Attempt to load from database if not yet passed in memory
-            try {
-                val db = com.example.turnaway.data.db.SoftLandingDatabase.getDatabase(applicationContext)
-                val dbTargets: Set<String> = runBlocking(Dispatchers.IO) {
-                    try {
-                        db.softLandingDao().getTargetedPackageNamesList().toSet()
-                    } catch (e: Exception) {
-                        emptySet<String>()
-                    }
-                }
-                if (dbTargets.isNotEmpty()) {
-                    targetedPackageNames = dbTargets
-                    targets = dbTargets
-                }
-            } catch (e: Exception) {
-                AppLogger.d(TAG, "Database target lookup note: ${e.message}")
-            }
-        }
-
-        if (targets.isEmpty()) {
-            AppLogger.w(TAG, "0 target applications selected. VPN tunnel will not capture traffic until apps are selected.")
-            return
-        }
-
-        buildAndEstablishInterface(targets)
-    }
-
-    private fun rebuildVpnTunnel() {
-        val targets = targetedPackageNames
-        AppLogger.i(TAG, "Rebuilding VPN tunnel dynamically for ${targets.size} target apps")
-
-        if (targets.isEmpty()) {
-            AppLogger.w(TAG, "0 target apps remaining after update. Closing VPN tunnel.")
-            closeVpnInterfaceOnly()
-            return
-        }
-
-        buildAndEstablishInterface(targets)
-    }
-
-    private fun buildAndEstablishInterface(targets: Set<String>) {
         try {
             val builder = Builder()
-                .setSession("TurnAway Per-App Throttler")
+                .setSession("TurnAway System-Wide Throttler")
                 .addAddress("10.0.0.2", 24)
                 .addRoute("0.0.0.0", 0)
                 .addDnsServer("8.8.8.8")
+                .addDnsServer("1.1.1.1")
                 .setMtu(1500)
 
-            // IPv6 address and route to prevent bypass on modern cellular & Wi-Fi networks
+            // IPv6 route configuration
             try {
                 builder.addAddress("fd00:1:fd00:1::2", 64)
                 builder.addRoute("::", 0)
@@ -208,42 +145,36 @@ class ThrottlerVpnService : VpnService() {
                 AppLogger.d(TAG, "IPv6 route configuration note: ${e.message}")
             }
 
-            // Strict Per-App Routing: Route ONLY selected target apps through TUN interface.
-            // NOTE: Do not call addDisallowedApplication alongside addAllowedApplication, as
-            // VpnService.Builder enforces that allowed and disallowed modes are mutually exclusive.
-            var addedCount = 0
-            val pm = packageManager
-            for (pkg in targets) {
-                if (pkg != packageName) {
-                    try {
-                        pm.getPackageInfo(pkg, 0)
-                        builder.addAllowedApplication(pkg)
-                        addedCount++
-                    } catch (e: PackageManager.NameNotFoundException) {
-                        AppLogger.w(TAG, "Target application package not found on device: $pkg", e.message)
-                    } catch (e: Exception) {
-                        AppLogger.w(TAG, "Could not add allowed application $pkg", e.message)
-                    }
-                }
+            // Exclude TurnAway itself to prevent self-interception loop
+            try {
+                builder.addDisallowedApplication(packageName)
+                AppLogger.d(TAG, "Excluded TurnAway package from VPN: $packageName")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Failed to exclude own package $packageName", e)
             }
 
-            if (addedCount == 0) {
-                AppLogger.w(TAG, "No valid installed target applications to route. Pausing VPN interface.")
-                closeVpnInterfaceOnly()
-                return
+            // Whitelist system dialer package to protect emergency communications
+            try {
+                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
+                val defaultDialer = telecomManager?.defaultDialerPackage
+                if (!defaultDialer.isNullOrBlank()) {
+                    builder.addDisallowedApplication(defaultDialer)
+                    AppLogger.i(TAG, "Excluded default system dialer from VPN: $defaultDialer")
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error excluding default dialer package", e)
             }
 
             val newPfd = builder.establish()
             if (newPfd == null) {
-                AppLogger.e(TAG, "Failed to establish new VPN TUN ParcelFileDescriptor")
+                AppLogger.e(TAG, "Failed to establish system-wide VPN TUN ParcelFileDescriptor")
                 closeVpnInterfaceOnly()
                 return
             }
 
-            // Seamlessly swap old descriptor for new descriptor
             closeVpnInterfaceOnly()
             vpnInterface = newPfd
-            AppLogger.i(TAG, "Strict per-app VPN tunnel established successfully for $addedCount apps!")
+            AppLogger.i(TAG, "System-wide VPN TUN interface established successfully!")
 
             startPacketForwardingLoop(newPfd)
         } catch (e: Exception) {
@@ -267,7 +198,7 @@ class ThrottlerVpnService : VpnService() {
                     if (read <= 0) {
                         delay(20)
                     }
-                    // Packets from regulated apps are drained and dropped (blackholed)
+                    // All read packets from system applications are drained and blackholed (dropped)
                 }
             } catch (e: CancellationException) {
                 AppLogger.d(TAG, "Packet forwarding loop cancelled")
@@ -289,7 +220,6 @@ class ThrottlerVpnService : VpnService() {
     private fun stopVpnSession() {
         isRunningState.set(false)
         isDropActiveState.set(false)
-        bandwidthKbpsState.set(-1)
 
         forwardingJob?.cancel()
         forwardingJob = null
@@ -298,7 +228,7 @@ class ThrottlerVpnService : VpnService() {
 
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
-        AppLogger.i(TAG, "VPN Session stopped successfully")
+        AppLogger.i(TAG, "VPN Session stopped successfully and network restored")
     }
 
     override fun onDestroy() {
