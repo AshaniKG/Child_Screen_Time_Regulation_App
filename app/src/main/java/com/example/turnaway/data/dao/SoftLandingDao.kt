@@ -42,6 +42,9 @@ interface SoftLandingDao {
     @Query("SELECT * FROM target_apps WHERE isTargeted = 1")
     fun getTargetedApps(): Flow<List<TargetAppEntity>>
 
+    @Query("SELECT packageName FROM target_apps WHERE isTargeted = 1")
+    suspend fun getTargetedPackageNamesList(): List<String>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTargetApp(app: TargetAppEntity)
 

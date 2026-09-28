@@ -35,6 +35,8 @@ class SoftLandingRepository(private val dao: SoftLandingDao) {
 
     fun getTargetedApps(): Flow<List<TargetAppEntity>> = dao.getTargetedApps()
 
+    suspend fun getTargetedPackageNamesList(): List<String> = dao.getTargetedPackageNamesList()
+
     suspend fun saveTargetApp(app: TargetAppEntity) {
         dao.insertTargetApp(app)
     }

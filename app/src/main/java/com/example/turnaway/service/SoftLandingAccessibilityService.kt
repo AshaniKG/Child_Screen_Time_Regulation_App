@@ -20,7 +20,6 @@ import com.example.turnaway.data.entity.SessionLogEntity
 import com.example.turnaway.engine.ColorDesaturationController
 import com.example.turnaway.engine.DecayCurveCalculator
 import com.example.turnaway.engine.DecayCurveType
-import com.example.turnaway.engine.FrameThrottlingController
 import com.example.turnaway.engine.TouchDelayQueueManager
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
@@ -32,16 +31,15 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: WindowManager
     private lateinit var overlayView: View
     private lateinit var desaturationController: ColorDesaturationController
-    private lateinit var frameThrottlingController: FrameThrottlingController
-    private lateinit var cpuFrameThrottlingController: com.example.turnaway.engine.CpuFrameThrottlingController
     private lateinit var touchDelayQueueManager: TouchDelayQueueManager
+    private lateinit var mediaVolumeManager: com.example.turnaway.engine.MediaVolumeManager
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var transitionJob: Job? = null
 
     private var activeProfile = RestrictionProfileEntity(profileName = "Standard Soft-Landing")
     private var isDispatchingGesture = false
-    private var savedVolume = 10
+    private var lastHandledTriggerTimestamp: Long = 0L
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -183,16 +181,21 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                         WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                         WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
             )
 
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutParams.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+
             overlayManager.addView(overlayView, layoutParams)
 
             desaturationController = ColorDesaturationController(this, overlayView, overlayManager)
-            frameThrottlingController = FrameThrottlingController(this, overlayManager)
-            cpuFrameThrottlingController = com.example.turnaway.engine.CpuFrameThrottlingController(this)
             touchDelayQueueManager = TouchDelayQueueManager(this)
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            mediaVolumeManager = com.example.turnaway.engine.MediaVolumeManager(this, audioManager)
             
             var gesturePath = android.graphics.Path()
             var gestureStartTime = 0L
@@ -236,20 +239,25 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         }
     }
 
+    private var lastInterceptState: Boolean? = null
+
     private fun updateOverlayTouchableState(shouldIntercept: Boolean) {
         if (!::overlayView.isInitialized || !::overlayManager.isInitialized) return
         try {
-            val lp = overlayView.layoutParams as WindowManager.LayoutParams
-            val currentlyIntercepting = (lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) == 0
             val wantToIntercept = shouldIntercept && !isDispatchingGesture
-            
-            if (currentlyIntercepting != wantToIntercept) {
-                if (wantToIntercept) {
-                    lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
-                } else {
-                    lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            if (lastInterceptState != wantToIntercept) {
+                lastInterceptState = wantToIntercept
+                val lp = overlayView.layoutParams as WindowManager.LayoutParams
+                val currentlyIntercepting = (lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE) == 0
+
+                if (currentlyIntercepting != wantToIntercept) {
+                    if (wantToIntercept) {
+                        lp.flags = lp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                    } else {
+                        lp.flags = lp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                    }
+                    overlayManager.updateViewLayout(overlayView, lp)
                 }
-                overlayManager.updateViewLayout(overlayView, lp)
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error updating overlay touchable state", e)
@@ -260,23 +268,93 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     private var targetedPackages: Set<String> = emptySet()
 
     private fun evaluateAppTargeting() {
-        if (!::frameThrottlingController.isInitialized) return
-        val currentPkg = currentForegroundPackage
-        val isExcluded = currentPkg == null ||
-                currentPkg == packageName ||
-                currentPkg == "com.android.systemui" ||
-                currentPkg == "com.android.settings" ||
-                currentPkg.contains("launcher")
+        val pkg = currentForegroundPackage ?: return
+        if (isPackageExcluded(pkg)) return
 
-        val isTargeted = if (targetedPackages.isEmpty()) {
-            !isExcluded
-        } else {
-            !isExcluded && targetedPackages.contains(currentPkg)
+        val isTargeted = targetedPackages.contains(pkg)
+        val currentState = EngineBridge.engineStatus.value.state
+
+        AppLogger.d(TAG, "evaluateAppTargeting: pkg=$pkg, isTargeted=$isTargeted, state=$currentState")
+
+        if (isTargeted) {
+            when (currentState) {
+                EngineState.MONITORING -> {
+                    AppLogger.d(TAG, "Targeted app ($pkg) active in foreground during MONITORING state. Awaiting manual wind-down start.")
+                }
+                EngineState.SOFT_LANDING_TRANSITION -> {
+                    AppLogger.d(TAG, "Targeted app ($pkg) active in foreground during SOFT_LANDING_TRANSITION.")
+                }
+                EngineState.LOCKED_OUT -> {
+                    AppLogger.w(TAG, "Targeted app ($pkg) launched during LOCKED_OUT state. Enforcing lockout.")
+                    enforceAppLockoutIfRestricted(pkg)
+                }
+            }
         }
-        AppLogger.d(TAG, "evaluateAppTargeting: pkg=$currentPkg, isTargeted=$isTargeted, targetedCount=${targetedPackages.size}")
-        frameThrottlingController.setTargetAppForeground(isTargeted)
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.setTargetAppForeground(isTargeted)
+    }
+
+    private fun isPackageExcluded(pkg: String): Boolean {
+        if (pkg.isBlank()) return true
+        if (pkg == packageName) return true
+        if (pkg == "com.android.systemui" || pkg == "com.android.settings" || pkg == "android" ||
+            pkg.contains("permissioncontroller") || pkg.contains("packageinstaller") || pkg.contains("inputmethod")) return true
+
+        try {
+            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            val defaultDialer = telecomManager?.defaultDialerPackage
+            if (!defaultDialer.isNullOrBlank() && pkg == defaultDialer) return true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error checking default dialer package", e)
+        }
+
+        try {
+            val homeIntent = android.content.Intent(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_HOME)
+            }
+            val launcherInfo = packageManager.resolveActivity(homeIntent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+            val launcherPkg = launcherInfo?.activityInfo?.packageName
+            if (!launcherPkg.isNullOrBlank() && pkg == launcherPkg) return true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error checking launcher package", e)
+        }
+
+        return false
+    }
+
+    private fun enforceAppLockoutIfRestricted(pkg: String) {
+        if (isPackageExcluded(pkg)) return
+
+        if (!targetedPackages.contains(pkg)) {
+            AppLogger.d(TAG, "Package $pkg is not in targeted set. Skipping app closure lockout.")
+            return
+        }
+
+        AppLogger.w(TAG, "Restricted app launch intercepted in LOCKED_OUT state: $pkg. Closing app completely via BACK & process kill.")
+
+        // 1. Perform BACK action to finish activity stack and close the app
+        performGlobalAction(GLOBAL_ACTION_BACK)
+
+        // 2. Kill background processes for target package
+        try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+            am?.killBackgroundProcesses(pkg)
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error killing background process for $pkg", e)
+        }
+
+        // 3. Safeguard: if app remains in foreground, send BACK & HOME fallback
+        serviceScope.launch {
+            delay(150)
+            if (currentForegroundPackage == pkg && targetedPackages.contains(pkg)) {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+                delay(100)
+                if (currentForegroundPackage == pkg && targetedPackages.contains(pkg)) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                }
+                try {
+                    val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                    am?.killBackgroundProcesses(pkg)
+                } catch (e: Exception) {}
+            }
         }
     }
 
@@ -290,10 +368,22 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     dao.getAllProfiles().collect { profiles ->
                         val p = profiles.firstOrNull()
                         if (p != null) {
-                            activeProfile = p
-                            AppLogger.i(TAG, "Active profile synced from database: ${p.profileName}, duration: ${p.transitionDurationMinutes}m")
+                            val updated = if (!p.enableColorDesaturation || !p.enableOverlayGraying) {
+                                p.copy(enableColorDesaturation = true, enableOverlayGraying = true)
+                            } else p
+                            if (updated != p) {
+                                dao.insertProfile(updated)
+                            }
+                            activeProfile = updated
+                            AppLogger.i(TAG, "Active profile synced from database: ${updated.profileName}, duration: ${updated.transitionDurationMinutes}m")
                         } else {
-                            dao.insertProfile(activeProfile)
+                            val newP = RestrictionProfileEntity(
+                                profileName = "Standard Soft-Landing",
+                                enableColorDesaturation = true,
+                                enableOverlayGraying = true
+                            )
+                            dao.insertProfile(newP)
+                            activeProfile = newP
                             AppLogger.i(TAG, "Inserted default Soft-Landing profile into Room database")
                         }
                     }
@@ -303,16 +393,22 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     dao.getTargetedApps().collect { apps ->
                         targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
                         AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps: $targetedPackages")
-                        evaluateAppTargeting()
+                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setTargetPackageNames(targetedPackages)
                     }
                 }
 
+                if (com.example.turnaway.engine.SessionStateManager.isSessionActive(applicationContext)) {
+                    val savedConfig = com.example.turnaway.engine.SessionStateManager.getSavedConfig(applicationContext)
+                    AppLogger.i(TAG, "Resuming persisted active session: totalUsage=${savedConfig.totalUsageMinutes}m, transition=${savedConfig.transitionMinutes}m")
+                    startTwoStageSessionLoop(savedConfig.totalUsageMinutes, savedConfig.transitionMinutes)
+                }
+
                 launch {
-                    EngineBridge.manualTriggerEvent.collect { timestamp ->
-                        if (timestamp != null) {
-                            AppLogger.i(TAG, "Manual Soft-Landing transition triggered (timestamp=$timestamp)")
-                            evaluateAppTargeting()
-                            startTransitionWindow(activeProfile)
+                    EngineBridge.manualTriggerEvent.collect { params ->
+                        if (params != null && params.timestamp > lastHandledTriggerTimestamp) {
+                            lastHandledTriggerTimestamp = params.timestamp
+                            AppLogger.i(TAG, "Manual two-stage session start triggered: totalUsage=${params.totalUsageMinutes}m, transition=${params.transitionMinutes}m")
+                            startTwoStageSessionLoop(params.totalUsageMinutes, params.transitionMinutes)
                         }
                     }
                 }
@@ -320,7 +416,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 launch {
                     EngineBridge.abortEvent.collect { shouldAbort ->
                         if (shouldAbort) {
-                            AppLogger.w(TAG, "Soft-Landing transition aborted by parent")
+                            AppLogger.w(TAG, "Soft-Landing session stopped by parent")
                             abortTransition()
                             EngineBridge.resetAbort()
                         }
@@ -332,210 +428,286 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun startTransitionWindow(profile: RestrictionProfileEntity) {
+    private fun startTwoStageSessionLoop(totalUsageMinutes: Int, transitionMinutes: Int) {
         transitionJob?.cancel()
         transitionJob = serviceScope.launch {
             try {
-                val durationMinutes = profile.transitionDurationMinutes.coerceAtLeast(1)
-                val durationMs = durationMinutes * 60 * 1000L
-                val startTime = System.currentTimeMillis()
+                val totalDurationMs = totalUsageMinutes * 60 * 1000L
+                val transitionMs = transitionMinutes * 60 * 1000L
+                val normalUsageMs = (totalDurationMs - transitionMs).coerceAtLeast(0L)
+                val startTime = com.example.turnaway.engine.SessionStateManager.getStartTimestamp(applicationContext).let {
+                    if (it > 0L) it else System.currentTimeMillis()
+                }
+
                 val curveType = try {
-                    DecayCurveType.valueOf(profile.curveType)
+                    DecayCurveType.valueOf(activeProfile.curveType)
                 } catch (e: Exception) {
                     DecayCurveType.LINEAR
                 }
 
                 val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
                 val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-                val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: maxVolume
-                if (currentVol > 0) {
-                    savedVolume = currentVol
-                }
 
-                AppLogger.i(TAG, "Gradual degradation started. Duration: ${durationMinutes}m, Curve: ${profile.curveType}, Baseline Vol: $savedVolume/$maxVolume")
-
-                // Ensure initial clean display at start of degradation
-                desaturationController.resetAll()
-
-                // Initial baseline state
-                frameThrottlingController.stopThrottling()
-                if (::cpuFrameThrottlingController.isInitialized) {
-                    cpuFrameThrottlingController.stopThrottling()
-                }
-                touchDelayQueueManager.setTouchDelay(0L)
-                updateOverlayTouchableState(false)
-
-                EngineBridge.updateStatus(
-                    EngineStatusData(
-                        state = EngineState.SOFT_LANDING_TRANSITION,
-                        timeRemainingMs = durationMs,
-                        currentSaturation = 1.0f,
-                        currentBlurRadius = 0,
-                        currentFps = 60,
-                        currentTouchDelayMs = 0L,
-                        currentVolumePercent = if (maxVolume > 0) savedVolume.toFloat() / maxVolume.toFloat() else 1.0f,
-                        activeProfile = profile
-                    )
+                AppLogger.i(
+                    TAG,
+                    "Started two-stage session. Total Usage: ${totalUsageMinutes}m, Transition: ${transitionMinutes}m, Normal Phase: ${normalUsageMs / 60000}m"
                 )
 
-                var elapsedMs = 0L
+                var wasTransitionInitialized = false
+                desaturationController.resetAll()
 
-                while (elapsedMs < durationMs && isActive) {
-                    val progress = (elapsedMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f)
-                    val decay = DecayCurveCalculator.calculateDecay(progress, curveType)
+                while (isActive && com.example.turnaway.engine.SessionStateManager.isSessionActive(applicationContext)) {
+                    val now = System.currentTimeMillis()
+                    val elapsedMs = now - startTime
 
-                    // 1. Smooth gradual System Grayscale, Overlay Veil, and Blur
-                    val saturationFactor = if (profile.enableColorDesaturation) (1.0f - decay).coerceIn(0.0f, 1.0f) else 1.0f
-                    val overlayProgress = if (profile.enableOverlayGraying) decay else 0f
-                    val currentBlur = if (profile.maxBlurRadius > 0) ((profile.maxBlurRadius * decay).toInt().coerceIn(0, profile.maxBlurRadius)) else 0
-                    desaturationController.updateVisualEffects(
-                        enableSystemGrayscale = profile.enableColorDesaturation,
-                        saturationFactor = saturationFactor,
-                        enableOverlay = profile.enableOverlayGraying,
-                        overlayProgress = overlayProgress,
-                        overlayColorHex = profile.overlayColorHex,
-                        overlayMaxAlpha = profile.overlayMaxAlpha,
-                        blurRadiusPx = currentBlur.toFloat()
-                    )
+                    if (elapsedMs < normalUsageMs) {
+                        // ─── STAGE 1: NORMAL USAGE (No Degradations) ───
+                        val totalRemainingMs = (totalDurationMs - elapsedMs).coerceAtLeast(0L)
+                        val normalRemainingMs = (normalUsageMs - elapsedMs).coerceAtLeast(0L)
 
-                    // 2. Audio Volume Reduction (gradually fades down to 0)
-                    var currentVolPercent = 1.0f
-                    if (profile.enableAudioFade && audioManager != null) {
-                        val targetVol = ((1.0f - decay) * savedVolume).toInt().coerceIn(0, maxVolume)
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, targetVol, 0)
-                        currentVolPercent = if (maxVolume > 0) targetVol.toFloat() / maxVolume.toFloat() else 0f
-                    }
+                        desaturationController.resetAll()
+                        touchDelayQueueManager.resetQueue()
+                        updateOverlayTouchableState(false)
+                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
-                    // 3. Screen Lagging / Frame Throttling (gradually drop FPS from 60 down to minFpsFloor)
-                    val currentFps = if (profile.enableFrameThrottling) {
-                        val fpsDrop = ((60 - profile.minFpsFloor) * decay).toInt()
-                        (60 - fpsDrop).coerceIn(profile.minFpsFloor, 60)
-                    } else {
-                        60
-                    }
-                    frameThrottlingController.setTargetFps(currentFps)
-                    if (::cpuFrameThrottlingController.isInitialized) {
-                        cpuFrameThrottlingController.setTargetFps(currentFps)
-                    }
+                        val currentVolPercent = if (maxVolume > 0 && audioManager != null) {
+                            audioManager.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / maxVolume.toFloat()
+                        } else 1.0f
 
-                    // 4. Gentle Touch Delay (gradually increase latency from 0ms up to maxTouchDelayMs)
-                    val currentTouchDelay = if (profile.enableTouchDelay) {
-                        (profile.maxTouchDelayMs * decay).toLong().coerceIn(0L, profile.maxTouchDelayMs)
-                    } else {
-                        0L
-                    }
-                    touchDelayQueueManager.setTouchDelay(currentTouchDelay)
-                    updateOverlayTouchableState(currentTouchDelay > 0L)
+                        val progressData = com.example.turnaway.engine.SessionProgress(
+                            state = com.example.turnaway.engine.SessionState.NORMAL_USAGE,
+                            config = com.example.turnaway.engine.SessionConfig(totalUsageMinutes, transitionMinutes),
+                            startTimestampMs = startTime,
+                            totalTimeRemainingMs = totalRemainingMs,
+                            normalTimeRemainingMs = normalRemainingMs,
+                            transitionTimeRemainingMs = transitionMs,
+                            currentSaturation = 1.0f,
+                            currentTouchDelayMs = 0L,
+                            currentVolumePercent = currentVolPercent,
+                            isNetworkThrottled = false
+                        )
+                        com.example.turnaway.engine.SessionStateManager.updateProgress(progressData)
 
-                    val remainingMs = (durationMs - elapsedMs).coerceAtLeast(0L)
-                    EngineBridge.updateStatus(
-                        EngineStatusData(
-                            state = EngineState.SOFT_LANDING_TRANSITION,
-                            timeRemainingMs = remainingMs,
+                        EngineBridge.updateStatus(
+                            EngineStatusData(
+                                state = EngineState.MONITORING,
+                                sessionState = com.example.turnaway.engine.SessionState.NORMAL_USAGE,
+                                totalUsageMinutes = totalUsageMinutes,
+                                transitionMinutes = transitionMinutes,
+                                timeRemainingMs = totalRemainingMs,
+                                normalTimeRemainingMs = normalRemainingMs,
+                                transitionTimeRemainingMs = transitionMs,
+                                currentSaturation = 1.0f,
+                                currentTouchDelayMs = 0L,
+                                currentVolumePercent = currentVolPercent,
+                                isNetworkThrottled = false,
+                                activeProfile = activeProfile
+                            )
+                        )
+                    } else if (elapsedMs < totalDurationMs) {
+                        // ─── STAGE 2: AUTOMATIC WIND-DOWN TRANSITION ───
+                        val transitionElapsedMs = elapsedMs - normalUsageMs
+                        val transitionRemainingMs = (totalDurationMs - elapsedMs).coerceAtLeast(0L)
+
+                        if (!wasTransitionInitialized) {
+                            wasTransitionInitialized = true
+                            if (::mediaVolumeManager.isInitialized) {
+                                mediaVolumeManager.startFade(transitionMs, activeProfile.enableAudioFade)
+                            }
+                            if (activeProfile.enableNetworkThrottling) {
+                                com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
+                            }
+                            AppLogger.i(TAG, "Automatic Wind-Down Transition triggered at t=$elapsedMs ms!")
+                        }
+
+                        // 1. Grayscale & Overlay Veil (with automatic visual overlay fallback if WRITE_SECURE_SETTINGS missing)
+                        val isGrayscaleActive = activeProfile.enableColorDesaturation &&
+                                DecayCurveCalculator.evaluateGrayscaleState(transitionElapsedMs, transitionMs)
+                        val saturationFactor = if (isGrayscaleActive) 0.0f else 1.0f
+
+                        val shouldEnableOverlay = activeProfile.enableOverlayGraying || (isGrayscaleActive && !desaturationController.hasWriteSecureSettingsPermission())
+
+                        val currentVeilAlpha = if (shouldEnableOverlay) {
+                            DecayCurveCalculator.calculateCurrentVeilAlpha(
+                                elapsedTransitionMs = transitionElapsedMs,
+                                totalTransitionMs = transitionMs,
+                                minVeilAlpha = 0.0f,
+                                maxVeilAlpha = activeProfile.overlayMaxAlpha
+                            )
+                        } else 0.0f
+
+                        val overlayProgressFactor = if (activeProfile.overlayMaxAlpha > 0.0f) {
+                            (currentVeilAlpha / activeProfile.overlayMaxAlpha).coerceIn(0.0f, 1.0f)
+                        } else 0.0f
+
+                        desaturationController.updateVisualEffects(
+                            enableSystemGrayscale = isGrayscaleActive,
+                            saturationFactor = saturationFactor,
+                            enableOverlay = shouldEnableOverlay,
+                            overlayProgress = overlayProgressFactor,
+                            overlayColorHex = activeProfile.overlayColorHex,
+                            overlayMaxAlpha = activeProfile.overlayMaxAlpha
+                        )
+
+                        // 2. Audio Volume Reduction
+                        var currentVolPercent = 1.0f
+                        if (activeProfile.enableAudioFade && ::mediaVolumeManager.isInitialized) {
+                            mediaVolumeManager.applyVolumeForElapsed(transitionElapsedMs)
+                            val allowedVol = mediaVolumeManager.calculateCurrentTargetVolume(transitionElapsedMs)
+                            currentVolPercent = if (maxVolume > 0) allowedVol.toFloat() / maxVolume.toFloat() else 0f
+                        }
+
+                        // 3. Touch Delay
+                        val currentTouchDelay = if (activeProfile.enableTouchDelay) {
+                            DecayCurveCalculator.calculateCurrentTouchDelay(
+                                elapsedTransitionMs = transitionElapsedMs,
+                                totalTransitionMs = transitionMs,
+                                minLagMs = 0L,
+                                maxLagMs = activeProfile.maxTouchDelayMs
+                            )
+                        } else 0L
+
+                        touchDelayQueueManager.setTouchDelay(currentTouchDelay)
+                        updateOverlayTouchableState(currentTouchDelay > 0L)
+
+                        val isThrottled = com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value
+
+                        val progressData = com.example.turnaway.engine.SessionProgress(
+                            state = com.example.turnaway.engine.SessionState.IN_TRANSITION,
+                            config = com.example.turnaway.engine.SessionConfig(totalUsageMinutes, transitionMinutes),
+                            startTimestampMs = startTime,
+                            totalTimeRemainingMs = transitionRemainingMs,
+                            normalTimeRemainingMs = 0L,
+                            transitionTimeRemainingMs = transitionRemainingMs,
                             currentSaturation = saturationFactor,
-                            currentBlurRadius = currentBlur,
-                            currentFps = currentFps,
                             currentTouchDelayMs = currentTouchDelay,
                             currentVolumePercent = currentVolPercent,
-                            activeProfile = profile
+                            isNetworkThrottled = isThrottled
                         )
-                    )
+                        com.example.turnaway.engine.SessionStateManager.updateProgress(progressData)
+
+                        EngineBridge.updateStatus(
+                            EngineStatusData(
+                                state = EngineState.SOFT_LANDING_TRANSITION,
+                                sessionState = com.example.turnaway.engine.SessionState.IN_TRANSITION,
+                                totalUsageMinutes = totalUsageMinutes,
+                                transitionMinutes = transitionMinutes,
+                                timeRemainingMs = transitionRemainingMs,
+                                normalTimeRemainingMs = 0L,
+                                transitionTimeRemainingMs = transitionRemainingMs,
+                                currentSaturation = saturationFactor,
+                                currentTouchDelayMs = currentTouchDelay,
+                                currentVolumePercent = currentVolPercent,
+                                isNetworkThrottled = isThrottled,
+                                activeProfile = activeProfile
+                            )
+                        )
+                    } else {
+                        // ─── STAGE 3: COMPLETED LOCKOUT (PERSISTENT UNTIL STOP) ───
+                        val isGrayscaleActive = activeProfile.enableColorDesaturation
+                        val shouldEnableOverlay = activeProfile.enableOverlayGraying || (isGrayscaleActive && !desaturationController.hasWriteSecureSettingsPermission())
+
+                        desaturationController.updateVisualEffects(
+                            enableSystemGrayscale = isGrayscaleActive,
+                            saturationFactor = 0.0f,
+                            enableOverlay = shouldEnableOverlay,
+                            overlayProgress = 1.0f,
+                            overlayColorHex = activeProfile.overlayColorHex,
+                            overlayMaxAlpha = activeProfile.overlayMaxAlpha
+                        )
+                        if (activeProfile.enableAudioFade && ::mediaVolumeManager.isInitialized) {
+                            mediaVolumeManager.applyVolumeForElapsed(transitionMs)
+                        }
+                        if (activeProfile.enableTouchDelay) {
+                            touchDelayQueueManager.setTouchDelay(activeProfile.maxTouchDelayMs)
+                            updateOverlayTouchableState(true)
+                        }
+
+                        if (activeProfile.enableNetworkThrottling) {
+                            com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setLockoutThrottle(true)
+                        }
+                        val isThrottled = activeProfile.enableNetworkThrottling || com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value
+
+                        val progressData = com.example.turnaway.engine.SessionProgress(
+                            state = com.example.turnaway.engine.SessionState.COMPLETED_LOCKED,
+                            config = com.example.turnaway.engine.SessionConfig(totalUsageMinutes, transitionMinutes),
+                            startTimestampMs = startTime,
+                            totalTimeRemainingMs = 0L,
+                            normalTimeRemainingMs = 0L,
+                            transitionTimeRemainingMs = 0L,
+                            currentSaturation = 0.0f,
+                            currentTouchDelayMs = if (activeProfile.enableTouchDelay) activeProfile.maxTouchDelayMs else 0L,
+                            currentVolumePercent = 0.0f,
+                            isNetworkThrottled = isThrottled
+                        )
+                        com.example.turnaway.engine.SessionStateManager.updateProgress(progressData)
+
+                        EngineBridge.updateStatus(
+                            EngineStatusData(
+                                state = EngineState.LOCKED_OUT,
+                                sessionState = com.example.turnaway.engine.SessionState.COMPLETED_LOCKED,
+                                totalUsageMinutes = totalUsageMinutes,
+                                transitionMinutes = transitionMinutes,
+                                timeRemainingMs = 0L,
+                                normalTimeRemainingMs = 0L,
+                                transitionTimeRemainingMs = 0L,
+                                currentSaturation = 0.0f,
+                                currentTouchDelayMs = if (activeProfile.enableTouchDelay) activeProfile.maxTouchDelayMs else 0L,
+                                currentVolumePercent = 0.0f,
+                                isNetworkThrottled = isThrottled,
+                                activeProfile = activeProfile
+                            )
+                        )
+
+                        currentForegroundPackage?.let { fgPkg ->
+                            enforceAppLockoutIfRestricted(fgPkg)
+                        }
+                        showTimeExceededNotification()
+                    }
 
                     delay(500)
-                    elapsedMs = System.currentTimeMillis() - startTime
-                }
-
-                if (isActive) {
-                    AppLogger.w(TAG, "Time limit exceeded! Screen is 100% grayscale, throttled, muted.")
-
-                    // Final state at end of duration: keep 100% native system grayscale flip, but remove visual overlay veil and blur
-                    desaturationController.updateVisualEffects(
-                        enableSystemGrayscale = profile.enableColorDesaturation,
-                        saturationFactor = 0.0f,
-                        enableOverlay = false,
-                        overlayProgress = 0.0f,
-                        overlayColorHex = profile.overlayColorHex,
-                        overlayMaxAlpha = profile.overlayMaxAlpha,
-                        blurRadiusPx = 0f
-                    )
-                    if (profile.enableAudioFade && audioManager != null) {
-                        audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, 0, 0)
-                    }
-                    if (profile.enableFrameThrottling) {
-                        frameThrottlingController.setTargetFps(profile.minFpsFloor)
-                        if (::cpuFrameThrottlingController.isInitialized) {
-                            cpuFrameThrottlingController.setTargetFps(profile.minFpsFloor)
-                        }
-                    }
-                    if (profile.enableTouchDelay) {
-                        touchDelayQueueManager.setTouchDelay(profile.maxTouchDelayMs)
-                        updateOverlayTouchableState(true)
-                    }
-
-                    EngineBridge.updateStatus(
-                        EngineStatusData(
-                            state = EngineState.LOCKED_OUT,
-                            timeRemainingMs = 0L,
-                            currentSaturation = 0.0f,
-                            currentBlurRadius = 0,
-                            currentFps = if (profile.enableFrameThrottling) profile.minFpsFloor else 60,
-                            currentTouchDelayMs = if (profile.enableTouchDelay) profile.maxTouchDelayMs else 0L,
-                            currentVolumePercent = 0.0f,
-                            activeProfile = profile
-                        )
-                    )
-
-                    showTimeExceededNotification()
-
-                    saveSessionMetrics(
-                        timestampStart = startTime,
-                        durationActiveMs = durationMs,
-                        timeToDisengageMs = durationMs,
-                        wasAborted = false
-                    )
                 }
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error in degradation transition coroutine", e)
+                AppLogger.e(TAG, "Error in two-stage session coroutine", e)
             }
         }
     }
 
     private fun abortTransition() {
         transitionJob?.cancel()
+        com.example.turnaway.engine.SessionStateManager.stopSession(applicationContext)
 
-        // 1. Immediately restore full color display, remove overlay veil and blur
+        // 1. Immediately restore full color display and remove overlay veil
         desaturationController.resetAll()
 
-        // 2. Immediately stop frame throttling and screen lagging
-        frameThrottlingController.stopThrottling()
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.stopThrottling()
-        }
-
         // 3. Immediately clear touch delay and disable touch interception
-        touchDelayQueueManager.setTouchDelay(0L)
+        touchDelayQueueManager.resetQueue()
         updateOverlayTouchableState(false)
+        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).stopSession()
 
         // 4. Restore normal audio volume
-        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-        val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
-        val restoreVol = if (savedVolume > 0) savedVolume else (maxVolume * 0.7f).toInt().coerceIn(1, maxVolume)
-        if (activeProfile.enableAudioFade && audioManager != null) {
-            audioManager.setStreamVolume(AudioManager.STREAM_MUSIC, restoreVol, 0)
+        if (::mediaVolumeManager.isInitialized) {
+            mediaVolumeManager.onStopClicked()
         }
 
         // 5. Restore normal status notification
         showMonitoringNotification()
 
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+        val maxVolume = audioManager?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15
+        val currentVol = audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: maxVolume
+        val volPercent = if (maxVolume > 0) currentVol.toFloat() / maxVolume.toFloat() else 1.0f
+
         EngineBridge.updateStatus(
             EngineStatusData(
                 state = EngineState.MONITORING,
+                sessionState = com.example.turnaway.engine.SessionState.IDLE,
                 timeRemainingMs = 0L,
+                normalTimeRemainingMs = 0L,
+                transitionTimeRemainingMs = 0L,
                 currentSaturation = 1.0f,
-                currentBlurRadius = 0,
-                currentFps = 60,
                 currentTouchDelayMs = 0L,
-                currentVolumePercent = if (maxVolume > 0) restoreVol.toFloat() / maxVolume.toFloat() else 1.0f,
+                currentVolumePercent = volPercent,
                 activeProfile = activeProfile
             )
         )
@@ -566,12 +738,25 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     }
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_VOLUME_UP || event.keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
-            val currentState = EngineBridge.engineStatus.value.state
-            if (currentState == EngineState.SOFT_LANDING_TRANSITION || currentState == EngineState.LOCKED_OUT) {
-                if (activeProfile.enableAudioFade) {
-                    AppLogger.w(TAG, "Blocked volume key press due to active soft-landing")
-                    return true // Consume the event to prevent volume change
+        if (::mediaVolumeManager.isInitialized && mediaVolumeManager.isFadingActive) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_UP,
+                KeyEvent.KEYCODE_VOLUME_DOWN,
+                KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                    AppLogger.w(TAG, "Blocked hardware volume key press (${event.keyCode}) due to active wind-down/lockout")
+                    return true // Consume event completely to prevent hardware volume changes & popup UI
+                }
+            }
+        }
+        val currentState = EngineBridge.engineStatus.value.state
+        if (currentState == EngineState.SOFT_LANDING_TRANSITION || currentState == EngineState.LOCKED_OUT) {
+            if (activeProfile.enableAudioFade) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_VOLUME_UP,
+                    KeyEvent.KEYCODE_VOLUME_DOWN,
+                    KeyEvent.KEYCODE_VOLUME_MUTE -> {
+                        return true
+                    }
                 }
             }
         }
@@ -599,6 +784,14 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     evaluateAppTargeting()
                 }
             }
+
+            // Check if app closure / re-launch lockout is active in LOCKED_OUT state
+            if (!pkg.isNullOrBlank()) {
+                val currentEngineState = EngineBridge.engineStatus.value.state
+                if (currentEngineState == EngineState.LOCKED_OUT) {
+                    enforceAppLockoutIfRestricted(pkg)
+                }
+            }
         }
     }
 
@@ -609,11 +802,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         AppLogger.i(TAG, "Accessibility Service destroyed")
-        if (::frameThrottlingController.isInitialized) {
-            frameThrottlingController.release()
-        }
-        if (::cpuFrameThrottlingController.isInitialized) {
-            cpuFrameThrottlingController.release()
+        if (::mediaVolumeManager.isInitialized) {
+            mediaVolumeManager.onStopClicked()
         }
         if (::overlayView.isInitialized) {
             try {

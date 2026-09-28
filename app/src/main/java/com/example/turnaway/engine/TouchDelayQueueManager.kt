@@ -13,7 +13,7 @@ class TouchDelayQueueManager(private val service: AccessibilityService) {
     private var currentDelayMs = 0L
 
     fun setTouchDelay(delayMs: Long) {
-        val newDelay = delayMs.coerceIn(0L, 800L)
+        val newDelay = delayMs.coerceIn(0L, 2000L)
         if (this.currentDelayMs != newDelay) {
             this.currentDelayMs = newDelay
             AppLogger.i(TAG, "Touch input latency set to: ${currentDelayMs}ms")
@@ -21,6 +21,26 @@ class TouchDelayQueueManager(private val service: AccessibilityService) {
     }
 
     fun getTouchDelay(): Long = currentDelayMs
+
+    fun resetQueue() {
+        handler.removeCallbacksAndMessages(null)
+        currentDelayMs = 0L
+        AppLogger.i(TAG, "Touch delay queue cleared and latency reset to 0ms")
+    }
+
+    fun calculateCurrentTouchDelay(
+        elapsedTransitionMs: Long,
+        totalTransitionMs: Long,
+        minLagMs: Long = 0L,
+        maxLagMs: Long
+    ): Long {
+        return DecayCurveCalculator.calculateCurrentTouchDelay(
+            elapsedTransitionMs,
+            totalTransitionMs,
+            minLagMs,
+            maxLagMs
+        )
+    }
 
     fun processInterceptedMotionEvent(path: Path, durationMs: Long, onComplete: () -> Unit) {
         if (currentDelayMs == 0L) {

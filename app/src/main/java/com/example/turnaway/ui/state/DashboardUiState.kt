@@ -4,6 +4,7 @@ import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
 import com.example.turnaway.data.entity.TargetAppEntity
+import com.example.turnaway.engine.SessionState
 import com.example.turnaway.service.EngineState
 
 data class DashboardUiState(
@@ -12,12 +13,16 @@ data class DashboardUiState(
     val activeSchedules: List<ScheduleConfigEntity> = emptyList(),
     val targetApps: List<TargetAppEntity> = emptyList(),
     val currentEngineState: EngineState = EngineState.MONITORING,
+    val currentSessionState: SessionState = SessionState.IDLE,
+    val totalUsageMinutes: Int = 30,
+    val transitionMinutes: Int = 5,
     val timeRemainingInPhaseMs: Long = 0L,
+    val normalTimeRemainingMs: Long = 0L,
+    val transitionTimeRemainingMs: Long = 0L,
     val currentSaturation: Float = 1.0f,
-    val currentBlurRadius: Int = 0,
-    val currentFps: Int = 60,
     val currentTouchDelayMs: Long = 0L,
     val currentVolumePercent: Float = 1.0f,
+    val isNetworkThrottled: Boolean = false,
     val recentSessionLogs: List<SessionLogEntity> = emptyList(),
     val hasOverlayPermission: Boolean = false,
     val hasAccessibilityPermission: Boolean = false,

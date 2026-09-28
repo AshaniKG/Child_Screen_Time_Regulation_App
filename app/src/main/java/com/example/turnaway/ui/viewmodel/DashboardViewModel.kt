@@ -59,12 +59,16 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             activeSchedules = dataTuple.schedules,
             targetApps = dataTuple.targetApps,
             currentEngineState = status.state,
+            currentSessionState = status.sessionState,
+            totalUsageMinutes = status.totalUsageMinutes,
+            transitionMinutes = status.transitionMinutes,
             timeRemainingInPhaseMs = status.timeRemainingMs,
+            normalTimeRemainingMs = status.normalTimeRemainingMs,
+            transitionTimeRemainingMs = status.transitionTimeRemainingMs,
             currentSaturation = status.currentSaturation,
-            currentBlurRadius = status.currentBlurRadius,
-            currentFps = status.currentFps,
             currentTouchDelayMs = status.currentTouchDelayMs,
             currentVolumePercent = status.currentVolumePercent,
+            isNetworkThrottled = status.isNetworkThrottled,
             recentSessionLogs = dataTuple.sessionLogs,
             hasOverlayPermission = perms.hasOverlay,
             hasAccessibilityPermission = perms.hasAccessibility,
@@ -146,14 +150,10 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
                     }
                 }
 
+                val isLegacyAllTargeted = currentApps.isNotEmpty() && currentApps.all { it.isTargeted }
+
                 val targetEntities = discoveredMap.map { (pkg, name) ->
-                    val isTargeted = currentMap[pkg]?.isTargeted
-                        ?: (pkg.contains("youtube", ignoreCase = true) ||
-                            pkg.contains("video", ignoreCase = true) ||
-                            pkg.contains("chrome", ignoreCase = true) ||
-                            pkg.contains("game", ignoreCase = true) ||
-                            pkg.contains("media", ignoreCase = true) ||
-                            pkg.contains("tiktok", ignoreCase = true))
+                    val isTargeted = if (isLegacyAllTargeted) false else (currentMap[pkg]?.isTargeted ?: false)
                     TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted)
                 }.sortedBy { it.appName.lowercase() }
 
@@ -213,21 +213,42 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
     fun setCustomTransitionDuration(durationMinutes: Int) {
         val current = uiState.value.activeProfile
-        val updated = current.copy(transitionDurationMinutes = durationMinutes.coerceAtLeast(1))
+        val updated = current.copy(transitionDurationMinutes = durationMinutes.coerceIn(1, 30))
         saveProfile(updated)
         AppLogger.i("Configuration", "Updated transition duration to ${updated.transitionDurationMinutes} minutes")
     }
 
+    fun startSession(context: Context, totalUsageMinutes: Int, transitionMinutes: Int) {
+        val total = totalUsageMinutes.coerceIn(1, 30)
+        val trans = transitionMinutes.coerceIn(1, total).coerceAtMost(total)
+
+        val currentProfile = uiState.value.activeProfile
+        saveProfile(currentProfile.copy(transitionDurationMinutes = trans))
+
+        val targets = uiState.value.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+        if (targets.isNotEmpty()) {
+            com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+        }
+
+        com.example.turnaway.engine.SessionStateManager.startSession(context, total, trans)
+        EngineBridge.triggerStartSession(total, trans)
+        AppLogger.i("Engine", "Parent started two-stage session with totalUsage=${total}m, transition=${trans}m")
+    }
+
+    fun stopSession(context: Context) {
+        abortCurrentTransition(context)
+    }
+
     fun triggerImmediateSoftLanding(context: Context) {
-        EngineBridge.triggerManualSoftLanding()
-        AppLogger.i("Engine", "Parent triggered degradation sequence via EngineBridge")
+        startSession(context, 30, 5)
     }
 
     fun triggerImmediateSoftLanding() {
-        EngineBridge.triggerManualSoftLanding()
+        EngineBridge.triggerStartSession(30, 5)
     }
 
     fun abortCurrentTransition(context: Context) {
+        com.example.turnaway.engine.SessionStateManager.stopSession(context)
         EngineBridge.abortTransition()
         if (GrayscaleManager.isPermissionGranted(context)) {
             GrayscaleManager.setSaturationLevel(context, 100)
@@ -237,17 +258,18 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         EngineBridge.updateStatus(
             EngineStatusData(
                 state = EngineState.MONITORING,
+                sessionState = com.example.turnaway.engine.SessionState.IDLE,
                 timeRemainingMs = 0L,
+                normalTimeRemainingMs = 0L,
+                transitionTimeRemainingMs = 0L,
                 currentSaturation = 1.0f,
-                currentBlurRadius = 0,
-                currentFps = 60,
                 currentTouchDelayMs = 0L,
                 currentVolumePercent = 1.0f,
                 activeProfile = uiState.value.activeProfile
             )
         )
         _isGrayscaleActive.value = false
-        AppLogger.w("Engine", "Parent aborted degradation. Restored full settings.")
+        AppLogger.w("Engine", "Parent stopped session. Restored full settings.")
     }
 
     fun abortCurrentTransition() {

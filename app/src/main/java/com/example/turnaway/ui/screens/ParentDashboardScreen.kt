@@ -28,6 +28,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.turnaway.ui.components.DisengagementAnalyticsCard
 import com.example.turnaway.ui.components.EngineStatusCard
 import com.example.turnaway.ui.components.GrayscalePermissionDialog
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
 import com.example.turnaway.ui.components.TargetAppsCard
@@ -44,6 +46,20 @@ fun ParentDashboardScreen(
 
     var selectedTab by remember { mutableIntStateOf(0) }
     var showGrayscaleDialog by remember { mutableStateOf(false) }
+
+    val vpnLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK) {
+            val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+            if (targets.isNotEmpty()) {
+                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+            }
+            if (uiState.currentSessionState != com.example.turnaway.engine.SessionState.IDLE) {
+                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.checkPermissions(context)
@@ -193,20 +209,30 @@ fun ParentDashboardScreen(
                     0 -> {
                         // Engine status hero card
                         EngineStatusCard(
+                            sessionState = uiState.currentSessionState,
                             engineState = uiState.currentEngineState,
-                            timeRemainingMs = uiState.timeRemainingInPhaseMs,
+                            totalTimeRemainingMs = uiState.timeRemainingInPhaseMs,
+                            normalTimeRemainingMs = uiState.normalTimeRemainingMs,
+                            transitionTimeRemainingMs = uiState.transitionTimeRemainingMs,
                             activeProfile = uiState.activeProfile,
                             currentTouchDelayMs = uiState.currentTouchDelayMs,
                             currentVolumePercent = uiState.currentVolumePercent,
-                            transitionDurationMinutes = uiState.activeProfile.transitionDurationMinutes,
-                            onDurationChange = { minutes -> viewModel.setCustomTransitionDuration(minutes) },
-                            onTriggerManualLanding = {
-                                viewModel.triggerImmediateSoftLanding(context)
+                            isNetworkThrottled = uiState.isNetworkThrottled,
+                            initialTotalUsageMinutes = uiState.totalUsageMinutes,
+                            initialTransitionMinutes = uiState.transitionMinutes,
+                            onStartSession = { totalUsage, transition ->
+                                if (uiState.activeProfile.enableNetworkThrottling) {
+                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                    if (vpnIntent != null) {
+                                        vpnLauncher.launch(vpnIntent)
+                                    }
+                                }
+                                viewModel.startSession(context, totalUsage, transition)
                                 if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
                                     showGrayscaleDialog = true
                                 }
                             },
-                            onEmergencyAbort = { viewModel.abortCurrentTransition(context) }
+                            onStopSession = { viewModel.stopSession(context) }
                         )
 
                         // Session insights
@@ -218,12 +244,37 @@ fun ParentDashboardScreen(
                     // ─── SETTINGS TAB ───
                     1 -> {
                         // Wind-down profile configuration
+                        val targetedCount = uiState.targetApps.count { it.isTargeted }
                         ProfileConfigurationCard(
                             profile = uiState.activeProfile,
-                            onProfileUpdated = { updated -> viewModel.saveProfile(updated) }
+                            regulatedAppsCount = targetedCount,
+                            onTestThrottle = {
+                                val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                if (vpnIntent != null) {
+                                    vpnLauncher.launch(vpnIntent)
+                                } else {
+                                    val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
+                                    if (targets.isEmpty()) {
+                                        android.widget.Toast.makeText(context, "Select at least 1 app in Regulated Apps below to test", android.widget.Toast.LENGTH_LONG).show()
+                                    } else {
+                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).triggerTemporaryDrop(5000L)
+                                        android.widget.Toast.makeText(context, "Testing 5-second network drop on ${targets.size} regulated apps…", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                            onProfileUpdated = { updated ->
+                                viewModel.saveProfile(updated)
+                                if (updated.enableNetworkThrottling) {
+                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                    if (vpnIntent != null) {
+                                        vpnLauncher.launch(vpnIntent)
+                                    }
+                                }
+                            }
                         )
 
-                        // Selective regulated applications
+                        // Selective regulated applications for network throttling
                         TargetAppsCard(
                             targetApps = uiState.targetApps,
                             onToggleAppTarget = { pkg, isTargeted ->
