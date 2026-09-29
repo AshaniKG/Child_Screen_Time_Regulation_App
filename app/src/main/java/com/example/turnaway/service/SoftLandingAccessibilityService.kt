@@ -514,10 +514,13 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             if (::mediaVolumeManager.isInitialized) {
                                 mediaVolumeManager.startFade(transitionMs, activeProfile.enableAudioFade)
                             }
-                            if (activeProfile.enableNetworkThrottling) {
-                                com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).startSession()
-                            }
                             AppLogger.i(TAG, "Automatic Wind-Down Transition triggered at t=$elapsedMs ms!")
+                        }
+
+                        // System-Wide Network Throttling Progress Evaluation
+                        if (activeProfile.enableNetworkThrottling) {
+                            com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext)
+                                .onTransitionProgress(transitionElapsedMs, transitionMs)
                         }
 
                         // 1. Grayscale & Overlay Veil (with automatic visual overlay fallback if WRITE_SECURE_SETTINGS missing)
@@ -604,6 +607,10 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         )
                     } else {
                         // ─── STAGE 3: COMPLETED LOCKOUT (PERSISTENT UNTIL STOP) ───
+                        // Auto-stop network throttling at 100% transition end
+                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext)
+                            .onTransitionProgress(transitionMs, transitionMs)
+
                         val isGrayscaleActive = activeProfile.enableColorDesaturation
                         val shouldEnableOverlay = activeProfile.enableOverlayGraying || (isGrayscaleActive && !desaturationController.hasWriteSecureSettingsPermission())
 
@@ -623,10 +630,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             updateOverlayTouchableState(true)
                         }
 
-                        if (activeProfile.enableNetworkThrottling) {
-                            com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setLockoutThrottle(true)
-                        }
-                        val isThrottled = activeProfile.enableNetworkThrottling || com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).isDropActiveFlow.value
+                        val isThrottled = false
 
                         val progressData = com.example.turnaway.engine.SessionProgress(
                             state = com.example.turnaway.engine.SessionState.COMPLETED_LOCKED,
