@@ -53,6 +53,14 @@ class SoftLandingRepository(private val dao: SoftLandingDao) {
         dao.updateAllTargetStatus(isTargeted)
     }
 
+    suspend fun updateAppBlockedStatus(packageName: String, isBlocked: Boolean) {
+        dao.updateBlockedStatus(packageName, isBlocked)
+    }
+
+    suspend fun updateAllBlockedStatus(isBlocked: Boolean) {
+        dao.updateAllBlockedStatus(isBlocked)
+    }
+
     suspend fun deleteTargetApp(packageName: String) {
         dao.deleteTargetApp(packageName)
     }

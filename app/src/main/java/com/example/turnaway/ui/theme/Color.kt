@@ -2,64 +2,98 @@ package com.example.turnaway.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// ─── Primary: Light Blue / Sky Azure ───
-val PrimaryColor = Color(0xFF006495)
-val OnPrimaryColor = Color(0xFFFFFFFF)
-val PrimaryContainerColor = Color(0xFFCBE6FF)
-val OnPrimaryContainerColor = Color(0xFF001E30)
+// ─── TurnAway Brand Colors (from DESIGN.md) ───
+val TurnawayPrimary = Color(0xFF081534)
+val TurnawayOnPrimary = Color(0xFFFFFFFF)
+val TurnawayPrimaryContainer = Color(0xFF1E2A4A)
+val TurnawayOnPrimaryContainer = Color(0xFF8691B7)
+val TurnawayInversePrimary = Color(0xFFBAC5EE)
 
-// ─── Secondary: Slate Ice Mist ───
-val SecondaryColor = Color(0xFF50606E)
-val OnSecondaryColor = Color(0xFFFFFFFF)
-val SecondaryContainerColor = Color(0xFFD3E5F5)
-val OnSecondaryContainerColor = Color(0xFF0C1D29)
+val TurnawaySecondary = Color(0xFF126967)
+val TurnawayOnSecondary = Color(0xFFFFFFFF)
+val TurnawaySecondaryContainer = Color(0xFFA2EDEA)
+val TurnawayOnSecondaryContainer = Color(0xFF1A6E6C)
 
-// ─── Tertiary: Soft Aqua Teal ───
-val TertiaryColor = Color(0xFF006874)
-val OnTertiaryColor = Color(0xFFFFFFFF)
-val TertiaryContainerColor = Color(0xFF9EEFFD)
-val OnTertiaryContainerColor = Color(0xFF001F24)
+val TurnawayTertiary = Color(0xFF001A20)
+val TurnawayOnTertiary = Color(0xFFFFFFFF)
+val TurnawayTertiaryContainer = Color(0xFF00303A)
+val TurnawayOnTertiaryContainer = Color(0xFF6A9AA8)
 
-// ─── Light Theme Surfaces (Ice & Sky White) ───
-val BackgroundLight = Color(0xFFF7F9FF)
-val OnBackgroundLight = Color(0xFF181C20)
-val SurfaceLight = Color(0xFFF7F9FF)
-val OnSurfaceLight = Color(0xFF181C20)
-val SurfaceVariantLight = Color(0xFFDCE3EB)
-val OnSurfaceVariantLight = Color(0xFF40484F)
-val SurfaceContainerLowestLight = Color(0xFFFFFFFF)
-val SurfaceContainerLowLight = Color(0xFFF0F4F9)
-val SurfaceContainerLight = Color(0xFFEAEFF5)
-val SurfaceContainerHighLight = Color(0xFFE4E9EF)
-val SurfaceContainerHighestLight = Color(0xFFDEE3E9)
-val OutlineLight = Color(0xFF71787E)
-val OutlineVariantLight = Color(0xFFC1C7CE)
+val TurnawayError = Color(0xFFBA1A1A)
+val TurnawayOnError = Color(0xFFFFFFFF)
+val TurnawayErrorContainer = Color(0xFFFFDAD6)
+val TurnawayOnErrorContainer = Color(0xFF93000A)
 
-// ─── Dark Theme Surfaces (Deep Space Navy) ───
-val BackgroundDark = Color(0xFF101418)
-val OnBackgroundDark = Color(0xFFE0E3E8)
-val SurfaceDark = Color(0xFF101418)
-val OnSurfaceDark = Color(0xFFE0E3E8)
-val SurfaceVariantDark = Color(0xFF40484F)
-val OnSurfaceVariantDark = Color(0xFFC1C7CE)
-val SurfaceContainerLowestDark = Color(0xFF0A0F12)
-val SurfaceContainerLowDark = Color(0xFF181C20)
-val SurfaceContainerDark = Color(0xFF1C2024)
-val SurfaceContainerHighDark = Color(0xFF262B2F)
-val SurfaceContainerHighestDark = Color(0xFF31363A)
-val OutlineDark = Color(0xFF8B9298)
-val OutlineVariantDark = Color(0xFF40484F)
+// Fixed Tonal Colors
+val TurnawayPrimaryFixed = Color(0xFFDAE2FF)
+val TurnawayPrimaryFixedDim = Color(0xFFBAC5EE)
+val TurnawayOnPrimaryFixed = Color(0xFF0D1A39)
+val TurnawayOnPrimaryFixedVariant = Color(0xFF3A4667)
 
-// ─── Semantic Status Colors ───
-val SuccessColor = Color(0xFF1B6B44)
-val OnSuccessColor = Color(0xFFFFFFFF)
-val SuccessContainerColor = Color(0xFFA5F2C5)
+val TurnawaySecondaryFixed = Color(0xFFA5F0ED)
+val TurnawaySecondaryFixedDim = Color(0xFF89D3D1)
+val TurnawayOnSecondaryFixed = Color(0xFF00201F)
+val TurnawayOnSecondaryFixedVariant = Color(0xFF00504E)
+
+val TurnawayTertiaryFixed = Color(0xFFB9EAFA)
+val TurnawayTertiaryFixedDim = Color(0xFF9DCEDE)
+val TurnawayOnTertiaryFixed = Color(0xFF001F27)
+val TurnawayOnTertiaryFixedVariant = Color(0xFF184D5A)
+
+// Surface & Background Tiers
+val TurnawayBackground = Color(0xFFF9F9FF)
+val TurnawayOnBackground = Color(0xFF161C26)
+val TurnawaySurface = Color(0xFFF9F9FF)
+val TurnawayOnSurface = Color(0xFF161C26)
+val TurnawaySurfaceDim = Color(0xFFD4DAE9)
+val TurnawaySurfaceBright = Color(0xFFF9F9FF)
+val TurnawaySurfaceVariant = Color(0xFFDDE2F1)
+val TurnawayOnSurfaceVariant = Color(0xFF45464E)
+val TurnawayOutline = Color(0xFF76777F)
+val TurnawayOutlineVariant = Color(0xFFC6C6CF)
+val TurnawaySurfaceTint = Color(0xFF525D80)
+
+val TurnawaySurfaceContainerLowest = Color(0xFFFFFFFF)
+val TurnawaySurfaceContainerLow = Color(0xFFF0F3FF)
+val TurnawaySurfaceContainer = Color(0xFFE8EEFD)
+val TurnawaySurfaceContainerHigh = Color(0xFFE3E8F7)
+val TurnawaySurfaceContainerHighest = Color(0xFFDDE2F1)
+
+val TurnawayInverseSurface = Color(0xFF2B313C)
+val TurnawayInverseOnSurface = Color(0xFFECF1FF)
+
+// Semantic Aliases for compatibility
+val PrimaryColor = TurnawayPrimary
+val OnPrimaryColor = TurnawayOnPrimary
+val PrimaryContainerColor = TurnawayPrimaryContainer
+val OnPrimaryContainerColor = TurnawayOnPrimaryContainer
+
+val SecondaryColor = TurnawaySecondary
+val OnSecondaryColor = TurnawayOnSecondary
+val SecondaryContainerColor = TurnawaySecondaryContainer
+val OnSecondaryContainerColor = TurnawayOnSecondaryContainer
+
+val TertiaryColor = TurnawayTertiary
+val OnTertiaryColor = TurnawayOnTertiary
+val TertiaryContainerColor = TurnawayTertiaryContainer
+val OnTertiaryContainerColor = TurnawayOnTertiaryContainer
+
+val SuccessColor = TurnawaySecondary
+val OnSuccessColor = TurnawayOnSecondary
+val SuccessContainerColor = TurnawaySecondaryContainer
 
 val WarningColor = Color(0xFF825500)
 val OnWarningColor = Color(0xFFFFFFFF)
 val WarningContainerColor = Color(0xFFFFDDB3)
 
-val ErrorColor = Color(0xFFBA1A1A)
-val OnErrorColor = Color(0xFFFFFFFF)
-val ErrorContainerColor = Color(0xFFFFDAD6)
-val OnErrorContainerColor = Color(0xFF410002)
+val ErrorColor = TurnawayError
+val OnErrorColor = TurnawayOnError
+val ErrorContainerColor = TurnawayErrorContainer
+val OnErrorContainerColor = TurnawayOnErrorContainer
+
+// Veil Palette Swatches
+val VeilCharcoal = Color(0xFF1E242B)
+val VeilAmberNight = Color(0xFF7C4A03)
+val VeilWarmSepia = Color(0xFF5A3825)
+val VeilMidnightNavy = Color(0xFF0E1E38)
+val VeilDeepCrimson = Color(0xFF4A121A)

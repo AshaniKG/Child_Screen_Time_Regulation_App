@@ -1,41 +1,28 @@
 package com.example.turnaway.ui.screens
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Fingerprint
-import androidx.compose.material.icons.outlined.Lock
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.turnaway.ui.components.DisengagementAnalyticsCard
-import com.example.turnaway.ui.components.EngineStatusCard
-import com.example.turnaway.ui.components.GrayscalePermissionDialog
+import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import com.example.turnaway.ui.components.ProfileConfigurationCard
-import com.example.turnaway.ui.components.SchedulerCard
-import com.example.turnaway.ui.components.TargetAppsCard
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Scaffold
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.turnaway.engine.SessionState
+import com.example.turnaway.engine.ThrottleSessionManager
+import com.example.turnaway.ui.components.BiometricLockOverlay
+import com.example.turnaway.ui.components.GrayscalePermissionDialog
+import com.example.turnaway.ui.components.TurnAwayBottomNavigation
 import com.example.turnaway.ui.viewmodel.DashboardViewModel
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ParentDashboardScreen(
     viewModel: DashboardViewModel,
@@ -45,18 +32,20 @@ fun ParentDashboardScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var selectedTab by remember { mutableIntStateOf(0) }
+    var showRulesSubScreen by remember { mutableStateOf(false) }
+    var appSelectionMode by remember { mutableStateOf(AppSelectionMode.RESTRICTED) }
     var showGrayscaleDialog by remember { mutableStateOf(false) }
 
     val vpnLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == android.app.Activity.RESULT_OK) {
+        if (result.resultCode == Activity.RESULT_OK) {
             val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
             if (targets.isNotEmpty()) {
-                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
+                ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
             }
-            if (uiState.currentSessionState != com.example.turnaway.engine.SessionState.IDLE) {
-                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
+            if (uiState.currentSessionState != SessionState.IDLE) {
+                ThrottleSessionManager.getInstance(context).startSession()
             }
         }
     }
@@ -77,315 +66,116 @@ fun ParentDashboardScreen(
     if (!uiState.isAuthenticated) {
         BiometricLockOverlay(onAuthenticate = onRequestBiometricAuth)
     } else {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = "TurnAway",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 20.sp
-                        )
-                    },
-                    actions = {
-                        IconButton(onClick = { viewModel.lockDashboard() }) {
-                            Icon(
-                                imageVector = Icons.Outlined.Lock,
-                                contentDescription = "Lock",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        titleContentColor = MaterialTheme.colorScheme.onSurface
-                    )
-                )
-            },
-            bottomBar = {
-                NavigationBar(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    tonalElevation = 0.dp
-                ) {
-                    NavigationBarItem(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        label = { Text("Home") },
-                        icon = {
-                            Icon(
-                                if (selectedTab == 0) Icons.Filled.Home else Icons.Default.Home,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                    NavigationBarItem(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        label = { Text("Settings") },
-                        icon = {
-                            Icon(
-                                if (selectedTab == 1) Icons.Filled.Settings else Icons.Default.Settings,
-                                contentDescription = null
-                            )
-                        }
-                    )
-                }
+        if (showRulesSubScreen) {
+            BackHandler {
+                showRulesSubScreen = false
             }
-        ) { padding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                // Top Warning Banner when Time Limit Exceeded
-                AnimatedVisibility(
-                    visible = uiState.currentEngineState == com.example.turnaway.service.EngineState.LOCKED_OUT,
-                    enter = fadeIn() + expandVertically(),
-                    exit = fadeOut() + shrinkVertically()
-                ) {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 6.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.error),
-                        shape = RoundedCornerShape(16.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Warning,
-                                    contentDescription = null,
-                                    tint = androidx.compose.ui.graphics.Color.White,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Column {
-                                    Text(
-                                        text = "TIME LIMIT EXCEEDED",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = androidx.compose.ui.graphics.Color.White
-                                    )
-                                    Text(
-                                        text = "Wind-down restrictions active",
-                                        fontSize = 11.sp,
-                                        color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.85f)
-                                    )
-                                }
-                            }
-                            Button(
-                                onClick = { viewModel.abortCurrentTransition(context) },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = androidx.compose.ui.graphics.Color.White,
-                                    contentColor = MaterialTheme.colorScheme.error
-                                ),
-                                shape = RoundedCornerShape(12.dp),
-                                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.Stop,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("STOP", fontWeight = FontWeight.Bold)
-                            }
-                        }
-                    }
+            RegulatedAppsScreen(
+                targetApps = uiState.targetApps,
+                mode = appSelectionMode,
+                onToggleAppTarget = { pkg, isTargeted ->
+                    viewModel.toggleAppTarget(pkg, isTargeted)
+                },
+                onSelectAllTargets = { selectAll ->
+                    viewModel.setAllAppsTargeted(selectAll)
+                },
+                onToggleAppBlocked = { pkg, isBlocked ->
+                    viewModel.toggleAppBlocked(pkg, isBlocked)
+                },
+                onSelectAllBlocked = { selectAll ->
+                    viewModel.setAllAppsBlocked(selectAll)
+                },
+                onBack = {
+                    showRulesSubScreen = false
                 }
-
-                when (selectedTab) {
-                    // ─── HOME TAB ───
-                    0 -> {
-                        // Engine status hero card
-                        EngineStatusCard(
-                            sessionState = uiState.currentSessionState,
-                            engineState = uiState.currentEngineState,
-                            totalTimeRemainingMs = uiState.timeRemainingInPhaseMs,
-                            normalTimeRemainingMs = uiState.normalTimeRemainingMs,
-                            transitionTimeRemainingMs = uiState.transitionTimeRemainingMs,
-                            activeProfile = uiState.activeProfile,
-                            currentTouchDelayMs = uiState.currentTouchDelayMs,
-                            currentVolumePercent = uiState.currentVolumePercent,
-                            isNetworkThrottled = uiState.isNetworkThrottled,
-                            initialTotalUsageMinutes = uiState.totalUsageMinutes,
-                            initialTransitionMinutes = uiState.transitionMinutes,
-                            onStartSession = { totalUsage, transition ->
-                                if (uiState.activeProfile.enableNetworkThrottling) {
-                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
-                                    if (vpnIntent != null) {
-                                        vpnLauncher.launch(vpnIntent)
-                                    }
-                                }
-                                viewModel.startSession(context, totalUsage, transition)
-                                if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
-                                    showGrayscaleDialog = true
-                                }
-                            },
-                            onStopSession = { viewModel.stopSession(context) }
-                        )
-
-                        // Session insights
-                        DisengagementAnalyticsCard(
-                            sessionLogs = uiState.recentSessionLogs
-                        )
-                    }
-
-                    // ─── SETTINGS TAB ───
-                    1 -> {
-                        // Wind-down profile configuration
-                        val targetedCount = uiState.targetApps.count { it.isTargeted }
-                        ProfileConfigurationCard(
-                            profile = uiState.activeProfile,
-                            regulatedAppsCount = targetedCount,
-                            onTestThrottle = {
-                                val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
-                                if (vpnIntent != null) {
-                                    vpnLauncher.launch(vpnIntent)
-                                } else {
-                                    val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
-                                    if (targets.isEmpty()) {
-                                        android.widget.Toast.makeText(context, "Select at least 1 app in Regulated Apps below to test", android.widget.Toast.LENGTH_LONG).show()
-                                    } else {
-                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
-                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).triggerTemporaryDrop(5000L)
-                                        android.widget.Toast.makeText(context, "Testing 5-second network drop on ${targets.size} regulated apps…", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
-                            onProfileUpdated = { updated ->
-                                viewModel.saveProfile(updated)
-                                if (updated.enableNetworkThrottling) {
-                                    val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
-                                    if (vpnIntent != null) {
-                                        vpnLauncher.launch(vpnIntent)
-                                    }
-                                }
-                            }
-                        )
-
-                        // Selective regulated applications for network throttling
-                        TargetAppsCard(
-                            targetApps = uiState.targetApps,
-                            onToggleAppTarget = { pkg, isTargeted ->
-                                viewModel.toggleAppTarget(pkg, isTargeted)
-                            },
-                            onSelectAll = { selectAll ->
-                                viewModel.setAllAppsTargeted(selectAll)
-                            }
-                        )
-
-                        // Bedtime schedule
-                        SchedulerCard(
-                            schedules = uiState.activeSchedules,
-                            onAddSchedule = { newSched -> viewModel.addSchedule(newSched) }
-                        )
-                    }
+            )
+        } else {
+            Scaffold(
+                bottomBar = {
+                    TurnAwayBottomNavigation(
+                        selectedTab = selectedTab,
+                        onTabSelected = { selectedTab = it }
+                    )
                 }
-
-                Spacer(modifier = Modifier.height(24.dp))
-            }
-        }
-    }
-}
-
-// ─── Biometric Lock Overlay ───
-
-@Composable
-fun BiometricLockOverlay(
-    onAuthenticate: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-            .padding(24.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-            ),
-            shape = RoundedCornerShape(28.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(32.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Surface(
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = CircleShape,
-                    modifier = Modifier.size(80.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Outlined.Lock,
-                            contentDescription = null,
-                            modifier = Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Text(
-                    text = "TurnAway",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = "Parent Portal",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    text = "Verify your identity to manage wind-down settings",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Spacer(modifier = Modifier.height(28.dp))
-
-                Button(
-                    onClick = onAuthenticate,
+            ) { padding ->
+                Box(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(16.dp)
+                        .fillMaxSize()
+                        .padding(bottom = padding.calculateBottomPadding())
                 ) {
-                    Icon(imageVector = Icons.Outlined.Fingerprint, contentDescription = null)
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        "Unlock",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 16.sp
-                    )
+                    AnimatedContent(
+                        targetState = selectedTab,
+                        transitionSpec = { fadeIn() togetherWith fadeOut() },
+                        label = "tabTransition"
+                    ) { tab ->
+                        when (tab) {
+                            0 -> {
+                                SessionDashboardScreen(
+                                    sessionState = uiState.currentSessionState,
+                                    engineState = uiState.currentEngineState,
+                                    timeRemainingMs = uiState.timeRemainingInPhaseMs,
+                                    normalTimeRemainingMs = uiState.normalTimeRemainingMs,
+                                    transitionTimeRemainingMs = uiState.transitionTimeRemainingMs,
+                                    totalUsageMinutes = uiState.totalUsageMinutes,
+                                    transitionMinutes = uiState.transitionMinutes,
+                                    targetApps = uiState.targetApps,
+                                    onStartSession = { totalUsage, transition ->
+                                        if (uiState.activeProfile.enableNetworkThrottling) {
+                                            val vpnIntent = ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                            if (vpnIntent != null) {
+                                                vpnLauncher.launch(vpnIntent)
+                                            }
+                                        }
+                                        viewModel.startSession(context, totalUsage, transition)
+                                        if (!uiState.hasWriteSecureSettingsPermission && uiState.activeProfile.enableColorDesaturation) {
+                                            showGrayscaleDialog = true
+                                        }
+                                    },
+                                    onStopSession = {
+                                        viewModel.stopSession(context)
+                                    },
+                                    onLockDashboard = {
+                                        viewModel.lockDashboard()
+                                    },
+                                    onNavigateToBlockedApps = {
+                                        appSelectionMode = AppSelectionMode.FULLY_BLOCKED
+                                        showRulesSubScreen = true
+                                    },
+                                    onNavigateToRestrictedApps = {
+                                        appSelectionMode = AppSelectionMode.RESTRICTED
+                                        showRulesSubScreen = true
+                                    }
+                                )
+                            }
+                            1 -> {
+                                WindDownSettingsScreen(
+                                    profile = uiState.activeProfile,
+                                    regulatedAppsCount = uiState.targetApps.count { it.isTargeted },
+                                    blockedAppsCount = uiState.targetApps.count { it.isBlocked },
+                                    onProfileUpdated = { updated ->
+                                        viewModel.saveProfile(updated)
+                                        if (updated.enableNetworkThrottling) {
+                                            val vpnIntent = ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
+                                            if (vpnIntent != null) {
+                                                vpnLauncher.launch(vpnIntent)
+                                            }
+                                        }
+                                    },
+                                    onLockDashboard = {
+                                        viewModel.lockDashboard()
+                                    },
+                                    onNavigateToBlockedApps = {
+                                        appSelectionMode = AppSelectionMode.FULLY_BLOCKED
+                                        showRulesSubScreen = true
+                                    },
+                                    onNavigateToRestrictedApps = {
+                                        appSelectionMode = AppSelectionMode.RESTRICTED
+                                        showRulesSubScreen = true
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
