@@ -23,6 +23,7 @@ import com.example.turnaway.engine.DecayCurveType
 import com.example.turnaway.engine.TouchDelayQueueManager
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.firstOrNull
 import android.provider.Settings
 import android.net.Uri
@@ -277,8 +278,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
         if (blockedPackages.contains(pkg)) {
             AppLogger.w(TAG, "Upfront Blocked App launch intercepted ($pkg) during active session. Ejecting immediately to Home.")
-            performGlobalAction(GLOBAL_ACTION_HOME)
-            enforceAppLockoutIfRestricted(pkg)
+            enforceAppLockout(pkg, isUpfrontBlock = true)
         }
     }
 
@@ -301,7 +301,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 }
                 EngineState.LOCKED_OUT -> {
                     AppLogger.w(TAG, "Targeted app ($pkg) launched during LOCKED_OUT state. Enforcing lockout.")
-                    enforceAppLockoutIfRestricted(pkg)
+                    enforceAppLockout(pkg, isUpfrontBlock = false)
                 }
             }
         }
@@ -335,37 +335,29 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         return false
     }
 
-    private var pendingForceStopPackage: String? = null
     private var lastEnforcedPackage: String? = null
     private var lastEnforcedTimestamp: Long = 0L
 
-    private fun enforceAppLockoutIfRestricted(pkg: String) {
+    private fun enforceAppLockout(pkg: String, isUpfrontBlock: Boolean = false) {
         if (isPackageExcluded(pkg)) return
 
-        if (!targetedPackages.contains(pkg) && !blockedPackages.contains(pkg)) {
-            AppLogger.d(TAG, "Package $pkg is not in targeted or blocked set. Skipping app closure lockout.")
-            return
-        }
-
         val now = System.currentTimeMillis()
-        if (pkg == lastEnforcedPackage && (now - lastEnforcedTimestamp) < 800L) {
+        if (pkg == lastEnforcedPackage && (now - lastEnforcedTimestamp) < 300L) {
             return
         }
         lastEnforcedPackage = pkg
         lastEnforcedTimestamp = now
 
-        AppLogger.w(TAG, "Restricted app launch intercepted: $pkg. Completely closing selected app via multi-BACK finish, process termination & Settings Force-Stop.")
+        AppLogger.w(TAG, "Enforcing app lockout for: $pkg (isUpfrontBlock=$isUpfrontBlock). Returning to Home.")
 
-        pendingForceStopPackage = pkg
-
-        // 1. Immediate multi-BACK action burst to finish active Activity stack (completely destroys app activities)
         serviceScope.launch(Dispatchers.Main) {
-            for (i in 1..6) {
-                performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(30)
-            }
-            
-            // 2. Kill background processes for target package
+            // 1. Instantly return to Home launcher
+            performGlobalAction(GLOBAL_ACTION_HOME)
+
+            // 2. Clear current foreground tracking so immediate re-launches are caught
+            currentForegroundPackage = null
+
+            // 3. Terminate background processes for blocked/locked app
             try {
                 val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
                 am?.killBackgroundProcesses(pkg)
@@ -373,76 +365,31 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 AppLogger.e(TAG, "Error killing background process for $pkg", e)
             }
 
-            delay(100)
-
-            // 3. Safeguard: if app remains in foreground, launch Settings App Details to Force Stop cleanly
-            if (currentForegroundPackage == pkg) {
-                try {
-                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:$pkg")
-                        addFlags(
-                            Intent.FLAG_ACTIVITY_NEW_TASK or 
-                            Intent.FLAG_ACTIVITY_NO_HISTORY or 
-                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
-                        )
-                    }
-                    startActivity(intent)
+            // 4. Non-intrusive Toast feedback
+            try {
+                val pm = packageManager
+                val appLabel = try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationLabel(info).toString()
                 } catch (e: Exception) {
-                    AppLogger.e(TAG, "Failed to launch Settings App Details for force stop", e)
-                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    pkg
                 }
-            } else {
-                performGlobalAction(GLOBAL_ACTION_HOME)
+                val message = if (isUpfrontBlock) {
+                    "⚠️ $appLabel is blocked during active TurnAway session"
+                } else {
+                    "⏳ Time limit reached: $appLabel is locked"
+                }
+                android.widget.Toast.makeText(applicationContext, message, android.widget.Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error displaying lockout Toast", e)
             }
         }
     }
 
-    private fun attemptAutomatedForceStopInSettings(pkg: String) {
-        val rootNode = rootInActiveWindow ?: return
-        try {
-            // Find "Force stop" button in system Settings screen
-            val forceStopNodes = rootNode.findAccessibilityNodeInfosByText("Force stop")
-                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("FORCE STOP") }
-                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Stop") }
-                .ifEmpty { rootNode.findAccessibilityNodeInfosByViewId("com.android.settings:id/force_stop_button") }
-
-            var clicked = false
-            for (node in forceStopNodes) {
-                if (node.isEnabled) {
-                    node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                    clicked = true
-                    AppLogger.i(TAG, "Automated Force-Stop clicked in Settings for package: $pkg")
-                    break
-                }
-            }
-
-            // Also handle confirmation dialog ("OK" or "Force stop")
-            val confirmNodes = rootNode.findAccessibilityNodeInfosByText("OK")
-                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Ok") }
-                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Force stop") }
-
-            for (confirmNode in confirmNodes) {
-                if (confirmNode.isClickable || confirmNode.parent?.isClickable == true) {
-                    val target = if (confirmNode.isClickable) confirmNode else confirmNode.parent
-                    target?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
-                    AppLogger.i(TAG, "Automated Force-Stop confirmation clicked for package: $pkg")
-                    pendingForceStopPackage = null
-                    performGlobalAction(GLOBAL_ACTION_HOME)
-                    break
-                }
-            }
-
-            if (clicked) {
-                serviceScope.launch {
-                    delay(200)
-                    performGlobalAction(GLOBAL_ACTION_HOME)
-                    pendingForceStopPackage = null
-                }
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error in automated force stop node clicking", e)
-        } finally {
-            rootNode.recycle()
+    private fun enforceAppLockoutIfRestricted(pkg: String) {
+        if (isPackageExcluded(pkg)) return
+        if (targetedPackages.contains(pkg) || blockedPackages.contains(pkg)) {
+            enforceAppLockout(pkg, isUpfrontBlock = blockedPackages.contains(pkg))
         }
     }
 
@@ -478,15 +425,22 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 }
 
                 launch {
-                    dao.getTargetedApps().collect { apps ->
+                    dao.getAllTargetApps().collect { apps ->
                         targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
                         AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps: $targetedPackages")
                     }
                 }
 
                 launch {
-                    dao.getBlockedApps().collect { apps ->
-                        blockedPackages = apps.filter { it.isBlocked }.map { it.packageName }.toSet()
+                    combine(
+                        dao.getAllTargetApps(),
+                        dao.getAllBlockedApps()
+                    ) { targetApps, blockedApps ->
+                        val fromTarget = targetApps.filter { it.isBlocked }.map { it.packageName }
+                        val fromBlocked = blockedApps.filter { it.isBlocked }.map { it.packageName }
+                        (fromTarget + fromBlocked).toSet()
+                    }.collect { blocked ->
+                        blockedPackages = blocked
                         AppLogger.i(TAG, "Synced ${blockedPackages.size} upfront blocked apps: $blockedPackages")
                     }
                 }
@@ -551,8 +505,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 currentForegroundPackage?.let { fgPkg ->
                     if (blockedPackages.contains(fgPkg) && !isPackageExcluded(fgPkg)) {
                         AppLogger.w(TAG, "Blocked app ($fgPkg) in foreground at session start t=0! Ejecting immediately.")
-                        performGlobalAction(GLOBAL_ACTION_HOME)
-                        enforceAppLockoutIfRestricted(fgPkg)
+                        enforceAppLockout(fgPkg, isUpfrontBlock = true)
                     }
                 }
 
@@ -890,10 +843,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // Handle automated Force-Stop if in Settings
-            if (pkg == "com.android.settings" && pendingForceStopPackage != null) {
-                attemptAutomatedForceStopInSettings(pendingForceStopPackage!!)
-            }
 
             // Check if upfront app block or lockout is active
             if (!pkg.isNullOrBlank()) {

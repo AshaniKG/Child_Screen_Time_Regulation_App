@@ -7,6 +7,7 @@ import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
 import com.example.turnaway.data.entity.TargetAppEntity
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.firstOrNull
 
 class SoftLandingRepository(private val dao: SoftLandingDao) {
 
@@ -57,6 +58,9 @@ class SoftLandingRepository(private val dao: SoftLandingDao) {
     suspend fun updateAppBlockedStatus(packageName: String, isBlocked: Boolean) {
         dao.updateTargetAppBlockedStatus(packageName, isBlocked)
         dao.updateBlockedAppStatus(packageName, isBlocked)
+        val app = dao.getAllTargetApps().firstOrNull()?.find { it.packageName == packageName }
+        val appName = app?.appName ?: packageName
+        dao.insertBlockedApp(BlockedAppEntity(packageName = packageName, appName = appName, isBlocked = isBlocked))
     }
 
     suspend fun updateAllBlockedStatus(isBlocked: Boolean) {

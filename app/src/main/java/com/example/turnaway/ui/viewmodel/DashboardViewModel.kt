@@ -159,12 +159,12 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
                 val targetEntities = discoveredMap.map { (pkg, name) ->
                     val isTargeted = if (isLegacyAllTargeted) false else (currentMap[pkg]?.isTargeted ?: false)
-                    val isBlocked = currentMap[pkg]?.isBlocked ?: false
+                    val isBlocked = (currentBlockedMap[pkg]?.isBlocked == true) || (currentMap[pkg]?.isBlocked == true)
                     TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted, isBlocked = isBlocked)
                 }.sortedBy { it.appName.lowercase() }
 
                 val blockedEntities = discoveredMap.map { (pkg, name) ->
-                    val isBlocked = currentBlockedMap[pkg]?.isBlocked ?: false
+                    val isBlocked = (currentBlockedMap[pkg]?.isBlocked == true) || (currentMap[pkg]?.isBlocked == true)
                     com.example.turnaway.data.entity.BlockedAppEntity(packageName = pkg, appName = name, isBlocked = isBlocked)
                 }.sortedBy { it.appName.lowercase() }
 
