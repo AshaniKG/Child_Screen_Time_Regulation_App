@@ -40,10 +40,6 @@ fun ParentDashboardScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
-            if (targets.isNotEmpty()) {
-                ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
-            }
             if (uiState.currentSessionState != SessionState.IDLE) {
                 ThrottleSessionManager.getInstance(context).startSession()
             }

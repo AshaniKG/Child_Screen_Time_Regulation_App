@@ -17,5 +17,5 @@ data class RestrictionProfileEntity(
     val enableTouchDelay: Boolean = true,          // Gentle Touch Slowdown
     val maxTouchDelayMs: Long = 400L,              // 400ms maximum touch delay
     val enableAudioFade: Boolean = true,           // Audio Volume Reduction
-    val enableNetworkThrottling: Boolean = true    // Network Throttling
+    val enableNetworkThrottling: Boolean = true    // System-wide Network Throttling
 )

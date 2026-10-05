@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import com.example.turnaway.data.entity.BlockedAppEntity
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
@@ -58,11 +59,36 @@ interface SoftLandingDao {
     suspend fun updateAllTargetStatus(isTargeted: Boolean)
 
     @Query("UPDATE target_apps SET isBlocked = :isBlocked WHERE packageName = :packageName")
-    suspend fun updateBlockedStatus(packageName: String, isBlocked: Boolean)
+    suspend fun updateTargetAppBlockedStatus(packageName: String, isBlocked: Boolean)
 
     @Query("UPDATE target_apps SET isBlocked = :isBlocked")
-    suspend fun updateAllBlockedStatus(isBlocked: Boolean)
+    suspend fun updateAllTargetAppsBlockedStatus(isBlocked: Boolean)
 
     @Query("DELETE FROM target_apps WHERE packageName = :packageName")
     suspend fun deleteTargetApp(packageName: String)
+
+    // ─── UPFRONT BLOCKED APPS QUERIES ───
+    @Query("SELECT * FROM blocked_apps ORDER BY appName ASC")
+    fun getAllBlockedApps(): Flow<List<BlockedAppEntity>>
+
+    @Query("SELECT * FROM blocked_apps WHERE isBlocked = 1")
+    fun getBlockedApps(): Flow<List<BlockedAppEntity>>
+
+    @Query("SELECT packageName FROM blocked_apps WHERE isBlocked = 1")
+    suspend fun getBlockedPackageNamesList(): List<String>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBlockedApp(app: BlockedAppEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertBlockedApps(apps: List<BlockedAppEntity>)
+
+    @Query("UPDATE blocked_apps SET isBlocked = :isBlocked WHERE packageName = :packageName")
+    suspend fun updateBlockedAppStatus(packageName: String, isBlocked: Boolean)
+
+    @Query("UPDATE blocked_apps SET isBlocked = :isBlocked")
+    suspend fun updateAllBlockedAppsStatus(isBlocked: Boolean)
+
+    @Query("DELETE FROM blocked_apps WHERE packageName = :packageName")
+    suspend fun deleteBlockedApp(packageName: String)
 }

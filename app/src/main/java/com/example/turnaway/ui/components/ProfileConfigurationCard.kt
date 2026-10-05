@@ -14,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.ColorLens
 import androidx.compose.material.icons.outlined.FilterBAndW
 import androidx.compose.material.icons.outlined.Layers
@@ -54,7 +55,6 @@ fun ProfileConfigurationCard(
     profile: RestrictionProfileEntity,
     onProfileUpdated: (RestrictionProfileEntity) -> Unit,
     regulatedAppsCount: Int = 0,
-    onTestThrottle: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -389,9 +389,11 @@ fun ProfileConfigurationCard(
                 )
             }
 
+
+
             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
 
-            // 8. Network Throttling
+            // 8. System-Wide Network Throttling
             Column {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -404,47 +406,17 @@ fun ProfileConfigurationCard(
                         tint = MaterialTheme.colorScheme.primary
                     )
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
+                        Text(text = "System-Wide Network Throttling", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Bold)
                         Text(
-                            text = if (enableNetworkThrottling && regulatedAppsCount > 0) {
-                                "5s drops every 45s on $regulatedAppsCount regulated apps (continuous block on lockout)"
-                            } else if (enableNetworkThrottling) {
-                                "⚠️ 0 regulated apps chosen. Select apps below to throttle."
-                            } else {
-                                "Regulate internet speed for selected apps during wind-down"
-                            },
+                            text = "Enforces 1-minute network drop alternating with 1-minute restored connection starting at 50% transition progress",
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (enableNetworkThrottling && regulatedAppsCount == 0) {
-                                MaterialTheme.colorScheme.error
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            }
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Switch(
                         checked = enableNetworkThrottling,
                         onCheckedChange = { enableNetworkThrottling = it }
                     )
-                }
-
-                if (enableNetworkThrottling && onTestThrottle != null) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = onTestThrottle,
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.NetworkCheck,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = if (regulatedAppsCount > 0) "Test 5s Network Drop ($regulatedAppsCount apps)" else "Select Apps Below to Test",
-                            style = MaterialTheme.typography.labelMedium
-                        )
-                    }
                 }
             }
 

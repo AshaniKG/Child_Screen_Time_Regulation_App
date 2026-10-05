@@ -1,6 +1,7 @@
 package com.example.turnaway.data.repository
 
 import com.example.turnaway.data.dao.SoftLandingDao
+import com.example.turnaway.data.entity.BlockedAppEntity
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
@@ -54,14 +55,35 @@ class SoftLandingRepository(private val dao: SoftLandingDao) {
     }
 
     suspend fun updateAppBlockedStatus(packageName: String, isBlocked: Boolean) {
-        dao.updateBlockedStatus(packageName, isBlocked)
+        dao.updateTargetAppBlockedStatus(packageName, isBlocked)
+        dao.updateBlockedAppStatus(packageName, isBlocked)
     }
 
     suspend fun updateAllBlockedStatus(isBlocked: Boolean) {
-        dao.updateAllBlockedStatus(isBlocked)
+        dao.updateAllTargetAppsBlockedStatus(isBlocked)
+        dao.updateAllBlockedAppsStatus(isBlocked)
     }
 
     suspend fun deleteTargetApp(packageName: String) {
         dao.deleteTargetApp(packageName)
+    }
+
+    // ─── UPFRONT BLOCKED APPS METHODS ───
+    fun getAllBlockedApps(): Flow<List<BlockedAppEntity>> = dao.getAllBlockedApps()
+
+    fun getBlockedApps(): Flow<List<BlockedAppEntity>> = dao.getBlockedApps()
+
+    suspend fun getBlockedPackageNamesList(): List<String> = dao.getBlockedPackageNamesList()
+
+    suspend fun saveBlockedApp(app: BlockedAppEntity) {
+        dao.insertBlockedApp(app)
+    }
+
+    suspend fun saveBlockedApps(apps: List<BlockedAppEntity>) {
+        dao.insertBlockedApps(apps)
+    }
+
+    suspend fun deleteBlockedApp(packageName: String) {
+        dao.deleteBlockedApp(packageName)
     }
 }

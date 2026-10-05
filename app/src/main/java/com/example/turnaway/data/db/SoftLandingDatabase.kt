@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.turnaway.data.dao.SoftLandingDao
+import com.example.turnaway.data.entity.BlockedAppEntity
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
@@ -15,9 +16,10 @@ import com.example.turnaway.data.entity.TargetAppEntity
         RestrictionProfileEntity::class,
         ScheduleConfigEntity::class,
         SessionLogEntity::class,
-        TargetAppEntity::class
+        TargetAppEntity::class,
+        BlockedAppEntity::class
     ],
-    version = 9,
+    version = 11,
     exportSchema = false
 )
 abstract class SoftLandingDatabase : RoomDatabase() {
