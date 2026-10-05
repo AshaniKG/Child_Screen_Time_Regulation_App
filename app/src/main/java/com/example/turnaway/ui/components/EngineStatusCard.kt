@@ -393,7 +393,7 @@ fun EngineStatusCard(
                                 MetricColumn("Touch Delay", "${currentTouchDelayMs}ms")
                             }
                             if (activeProfile.enableNetworkThrottling) {
-                                MetricColumn("Network", if (isNetworkThrottled) "Throttled (5s)" else "Normal")
+                                MetricColumn("Network", if (isNetworkThrottled) "Throttled (10s)" else "Normal")
                             }
                         }
                     }

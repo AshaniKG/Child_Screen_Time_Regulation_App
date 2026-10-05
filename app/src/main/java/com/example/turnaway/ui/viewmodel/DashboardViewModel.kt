@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.provider.Settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.turnaway.data.entity.BlockedAppEntity
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
@@ -33,9 +34,10 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         repository.getAllProfiles().map { it.firstOrNull() ?: RestrictionProfileEntity(profileName = "Standard") },
         repository.getAllSchedules(),
         repository.getAllTargetApps(),
+        repository.getAllBlockedApps(),
         repository.getRecentSessionLogs()
-    ) { profile, schedules, targetApps, logs ->
-        DataTuple(profile, schedules, targetApps, logs)
+    ) { profile, schedules, targetApps, blockedApps, logs ->
+        DataTuple(profile, schedules, targetApps, blockedApps, logs)
     }
 
     private val permissionsFlow = combine(
@@ -58,6 +60,7 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
             activeProfile = dataTuple.profile,
             activeSchedules = dataTuple.schedules,
             targetApps = dataTuple.targetApps,
+            blockedApps = dataTuple.blockedApps,
             currentEngineState = status.state,
             currentSessionState = status.sessionState,
             totalUsageMinutes = status.totalUsageMinutes,
@@ -99,6 +102,8 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
                 val pm = context.packageManager
                 val currentApps = repository.getAllTargetApps().firstOrNull() ?: emptyList()
                 val currentMap = currentApps.associateBy { it.packageName }
+                val currentBlockedApps = repository.getAllBlockedApps().firstOrNull() ?: emptyList()
+                val currentBlockedMap = currentBlockedApps.associateBy { it.packageName }
 
                 val excludedPackages = setOf(
                     context.packageName,
@@ -157,9 +162,18 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
                     TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted)
                 }.sortedBy { it.appName.lowercase() }
 
+                val blockedEntities = discoveredMap.map { (pkg, name) ->
+                    val isBlocked = currentBlockedMap[pkg]?.isBlocked ?: false
+                    com.example.turnaway.data.entity.BlockedAppEntity(packageName = pkg, appName = name, isBlocked = isBlocked)
+                }.sortedBy { it.appName.lowercase() }
+
                 if (targetEntities.isNotEmpty()) {
                     repository.saveTargetApps(targetEntities)
-                    AppLogger.d("TargetApps", "Synced ${targetEntities.size} installed apps into Room database")
+                    AppLogger.d("TargetApps", "Synced ${targetEntities.size} installed apps into Room target database")
+                }
+                if (blockedEntities.isNotEmpty()) {
+                    repository.saveBlockedApps(blockedEntities)
+                    AppLogger.d("BlockedApps", "Synced ${blockedEntities.size} installed apps into Room blocked database")
                 }
             } catch (e: Exception) {
                 AppLogger.e("TargetApps", "Error syncing installed apps", e)
@@ -178,6 +192,20 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateAllTargetStatus(isTargeted)
             AppLogger.i("TargetApps", "Updated all apps target status: $isTargeted")
+        }
+    }
+
+    fun toggleBlockedApp(packageName: String, isBlocked: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAppBlockedStatus(packageName, isBlocked)
+            AppLogger.i("BlockedApps", "Updated blocked status: $packageName -> $isBlocked")
+        }
+    }
+
+    fun setAllAppsBlocked(isBlocked: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAllBlockedStatus(isBlocked)
+            AppLogger.i("BlockedApps", "Updated all apps blocked status: $isBlocked")
         }
     }
 
@@ -224,11 +252,6 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
         val currentProfile = uiState.value.activeProfile
         saveProfile(currentProfile.copy(transitionDurationMinutes = trans))
-
-        val targets = uiState.value.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
-        if (targets.isNotEmpty()) {
-            com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
-        }
 
         com.example.turnaway.engine.SessionStateManager.startSession(context, total, trans)
         EngineBridge.triggerStartSession(total, trans)
@@ -295,6 +318,7 @@ private data class DataTuple(
     val profile: RestrictionProfileEntity,
     val schedules: List<ScheduleConfigEntity>,
     val targetApps: List<TargetAppEntity>,
+    val blockedApps: List<BlockedAppEntity>,
     val sessionLogs: List<SessionLogEntity>
 )
 

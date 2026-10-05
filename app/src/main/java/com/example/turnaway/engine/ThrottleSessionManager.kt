@@ -9,9 +9,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Manager adapter for local network throttling VPN sessions, delegating autonomous timing cycles
- * to [ThrottleCycleManager] and providing status flows for the application UI.
+ * to [ThrottleCycleManager] and providing status flows for application UI.
  */
-class ThrottleSessionManager private constructor(private val context: Context) : NetworkThrottleController {
+class ThrottleSessionManager private constructor(private val context: Context) {
 
     private val TAG = "ThrottleSessionManager"
     private val isSessionActiveState = AtomicBoolean(false)
@@ -34,7 +34,7 @@ class ThrottleSessionManager private constructor(private val context: Context) :
 
     /**
      * Checks if VPN permission consent is required.
-     * Returns intent if permission is needed, or null if already granted.
+     * Returns null if consent is already granted, or Intent to request consent from user.
      */
     fun checkVpnPermissionNeeded(): Intent? {
         return VpnService.prepare(context)
@@ -44,45 +44,22 @@ class ThrottleSessionManager private constructor(private val context: Context) :
         throttleCycleManager.onTransitionProgress(elapsedMs, totalTransitionMs)
     }
 
-    override fun startSession() {
+    fun startSession() {
         if (isSessionActiveState.getAndSet(true)) {
             AppLogger.d(TAG, "Network throttling session is already active")
             return
         }
         AppLogger.i(TAG, "Starting network throttling session")
+        throttleCycleManager.startThrottlingCycle()
     }
 
-    override fun stopSession() {
+    fun stopSession() {
         isSessionActiveState.set(false)
         AppLogger.i(TAG, "Stopping network throttling session")
         throttleCycleManager.stopAndTeardown()
     }
 
-    override fun setThrottlingActive(enabled: Boolean) {
-        if (enabled) {
-            startSession()
-        } else {
-            stopSession()
-        }
-    }
-
-    override fun triggerTemporaryDrop(durationMs: Long) {
-        throttleCycleManager.startThrottlingCycle()
-    }
-
-    override fun setBandwidthLimitKbps(kbps: Int?) {
-        AppLogger.d(TAG, "Bandwidth limit configuration note: $kbps")
-    }
-
-    fun isSessionActive(): Boolean {
+    fun isThrottlingActive(): Boolean {
         return isSessionActiveState.get() || throttleCycleManager.isThrottlingRunning || ThrottlerVpnService.isRunning()
-    }
-
-    fun setTargetPackageNames(packages: Set<String>) {
-        // System-wide throttling routes all device traffic globally; target app filtering is no longer required.
-    }
-
-    fun updateTargetPackages(packages: Set<String>) {
-        setTargetPackageNames(packages)
     }
 }

@@ -30,6 +30,7 @@ import com.example.turnaway.ui.components.EngineStatusCard
 import com.example.turnaway.ui.components.GrayscalePermissionDialog
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.turnaway.ui.components.BlockedAppsCard
 import com.example.turnaway.ui.components.ProfileConfigurationCard
 import com.example.turnaway.ui.components.SchedulerCard
 import com.example.turnaway.ui.components.TargetAppsCard
@@ -51,10 +52,6 @@ fun ParentDashboardScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == android.app.Activity.RESULT_OK) {
-            val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
-            if (targets.isNotEmpty()) {
-                com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
-            }
             if (uiState.currentSessionState != com.example.turnaway.engine.SessionState.IDLE) {
                 com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).startSession()
             }
@@ -235,6 +232,19 @@ fun ParentDashboardScreen(
                             onStopSession = { viewModel.stopSession(context) }
                         )
 
+                        // Upfront Blocked Apps Card (Session-Long Hard Block)
+                        val isSessionRunning = uiState.currentSessionState != com.example.turnaway.engine.SessionState.IDLE
+                        BlockedAppsCard(
+                            blockedApps = uiState.blockedApps,
+                            onToggleAppBlocked = { pkg, isBlocked ->
+                                viewModel.toggleBlockedApp(pkg, isBlocked)
+                            },
+                            onSelectAll = { blockAll ->
+                                viewModel.setAllAppsBlocked(blockAll)
+                            },
+                            isSessionActive = isSessionRunning
+                        )
+
                         // Session insights
                         DisengagementAnalyticsCard(
                             sessionLogs = uiState.recentSessionLogs
@@ -248,21 +258,6 @@ fun ParentDashboardScreen(
                         ProfileConfigurationCard(
                             profile = uiState.activeProfile,
                             regulatedAppsCount = targetedCount,
-                            onTestThrottle = {
-                                val vpnIntent = com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).checkVpnPermissionNeeded()
-                                if (vpnIntent != null) {
-                                    vpnLauncher.launch(vpnIntent)
-                                } else {
-                                    val targets = uiState.targetApps.filter { it.isTargeted }.map { it.packageName }.toSet()
-                                    if (targets.isEmpty()) {
-                                        android.widget.Toast.makeText(context, "Select at least 1 app in Regulated Apps below to test", android.widget.Toast.LENGTH_LONG).show()
-                                    } else {
-                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).setTargetPackageNames(targets)
-                                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(context).triggerTemporaryDrop(5000L)
-                                        android.widget.Toast.makeText(context, "Testing 5-second network drop on ${targets.size} regulated apps…", android.widget.Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            },
                             onProfileUpdated = { updated ->
                                 viewModel.saveProfile(updated)
                                 if (updated.enableNetworkThrottling) {
@@ -274,7 +269,7 @@ fun ParentDashboardScreen(
                             }
                         )
 
-                        // Selective regulated applications for network throttling
+                        // Selective regulated applications (End-of-transition lockout)
                         TargetAppsCard(
                             targetApps = uiState.targetApps,
                             onToggleAppTarget = { pkg, isTargeted ->

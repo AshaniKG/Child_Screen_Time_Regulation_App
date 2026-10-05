@@ -2,239 +2,159 @@ package com.example.turnaway.engine
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
-import android.telecom.TelecomManager
 import androidx.core.app.NotificationCompat
-import com.example.turnaway.MainActivity
 import com.example.turnaway.util.AppLogger
-import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import java.io.FileInputStream
-import java.util.concurrent.atomic.AtomicBoolean
+import java.io.FileOutputStream
+import java.io.IOException
 
 /**
- * On-device system-wide local VPN Service enforcing mid-transition network throttling.
+ * On-device system-wide local VPN Service enforcing 10-second network drops every 60 seconds
+ * during the wind-down transition phase.
  *
- * All device traffic (except TurnAway and system dialer) is routed through the TUN interface.
- * When [isDropActive] is true, payload packets are dropped (blackholed) for 10 seconds.
- * When [isDropActive] is false, the TUN interface is closed/idle so normal system network
- * traffic flows over native hardware interfaces with zero latency or performance penalty.
+ * When [isDropActive] is true, system IP traffic is routed into a dummy TUN interface (packet blackholing).
+ * When [isDropActive] is false, the TUN interface is closed/idle so normal system network connectivity flows smoothly.
  */
 class ThrottlerVpnService : VpnService() {
 
     private val TAG = "ThrottlerVpnService"
     private var vpnInterface: ParcelFileDescriptor? = null
-    private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var forwardingJob: Job? = null
 
     companion object {
         const val ACTION_START = "com.example.turnaway.VPN_START"
         const val ACTION_STOP = "com.example.turnaway.VPN_STOP"
-
-        private val isRunningState = AtomicBoolean(false)
-        private val isDropActiveState = AtomicBoolean(false)
+        private const val NOTIFICATION_ID = 2001
+        private const val CHANNEL_ID = "throttler_vpn_channel"
 
         @Volatile
         var instance: ThrottlerVpnService? = null
+            private set
 
-        fun isRunning(): Boolean = isRunningState.get()
-        fun isDropActive(): Boolean = isDropActiveState.get()
+        private val _isDropActiveFlow = MutableStateFlow(false)
+        val isDropActiveFlow: StateFlow<Boolean> = _isDropActiveFlow.asStateFlow()
 
         fun setDropState(active: Boolean) {
-            val wasActive = isDropActiveState.getAndSet(active)
+            val wasActive = _isDropActiveFlow.value
+            _isDropActiveFlow.value = active
             AppLogger.i("ThrottlerVpnService", "setDropState: active=$active (was=$wasActive)")
-            instance?.applyDropState(active)
+            instance?.updateDropExecutionState(active)
         }
+
+        fun isRunning(): Boolean = instance != null
     }
 
     override fun onCreate() {
         super.onCreate()
         instance = this
+        createNotificationChannel()
+        AppLogger.i(TAG, "ThrottlerVpnService created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
+        val action = intent?.action ?: ACTION_START
+        AppLogger.i(TAG, "onStartCommand: action=$action")
 
         when (action) {
             ACTION_STOP -> {
                 stopVpnSession()
+                stopSelf()
                 return START_NOT_STICKY
             }
-            else -> {
-                isRunningState.set(true)
+            ACTION_START -> {
                 startForegroundVpnNotification()
-                if (isDropActiveState.get()) {
+                if (_isDropActiveFlow.value) {
                     setupAndStartVpnTunnel()
                 }
-                return START_STICKY
             }
         }
+        return START_STICKY
     }
 
-    fun applyDropState(active: Boolean) {
-        serviceScope.launch(Dispatchers.Main) {
-            if (active) {
-                AppLogger.w(TAG, "Engaging system-wide network drop window (blackholing packets)")
-                setupAndStartVpnTunnel()
-            } else {
-                AppLogger.i(TAG, "Releasing network drop window; restoring normal system connectivity")
-                closeVpnInterfaceOnly()
-            }
-        }
-    }
-
-    private fun startForegroundVpnNotification() {
-        val channelId = "turnaway_vpn_channel"
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "System-Wide Network Throttling VPN",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            manager.createNotificationChannel(channel)
-        }
-
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            2001,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE else 0)
-        )
-
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("System-Wide Network Throttling Active")
-            .setContentText("Automated mid-transition network regulation active across device.")
-            .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .build()
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(2001, notification, android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+    fun updateDropExecutionState(active: Boolean) {
+        if (active) {
+            AppLogger.w(TAG, "Engaging system-wide network drop window (blackholing packets)")
+            setupAndStartVpnTunnel()
         } else {
-            startForeground(2001, notification)
+            AppLogger.i(TAG, "Releasing network drop window; restoring normal system connectivity")
+            closeVpnTunnel()
         }
     }
 
     private fun setupAndStartVpnTunnel() {
+        if (vpnInterface != null) return
+
         try {
             val builder = Builder()
-                .setSession("TurnAway System-Wide Throttler")
                 .addAddress("10.0.0.2", 24)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer("8.8.8.8")
-                .addDnsServer("1.1.1.1")
-                .setMtu(1500)
+                .addRoute("::", 0)
+                .setSession("TurnAway System-Wide Throttler")
 
-            // IPv6 route configuration
-            try {
-                builder.addAddress("fd00:1:fd00:1::2", 64)
-                builder.addRoute("::", 0)
-                builder.addDnsServer("2001:4860:4860::8888")
-            } catch (e: Exception) {
-                AppLogger.d(TAG, "IPv6 route configuration note: ${e.message}")
-            }
-
-            // Exclude TurnAway itself to prevent self-interception loop
-            try {
-                builder.addDisallowedApplication(packageName)
-                AppLogger.d(TAG, "Excluded TurnAway package from VPN: $packageName")
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "Failed to exclude own package $packageName", e)
-            }
-
-            // Whitelist system dialer package to protect emergency communications
-            try {
-                val telecomManager = getSystemService(Context.TELECOM_SERVICE) as? TelecomManager
-                val defaultDialer = telecomManager?.defaultDialerPackage
-                if (!defaultDialer.isNullOrBlank()) {
-                    builder.addDisallowedApplication(defaultDialer)
-                    AppLogger.i(TAG, "Excluded default system dialer from VPN: $defaultDialer")
-                }
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "Error excluding default dialer package", e)
-            }
-
-            val newPfd = builder.establish()
-            if (newPfd == null) {
-                AppLogger.e(TAG, "Failed to establish system-wide VPN TUN ParcelFileDescriptor")
-                closeVpnInterfaceOnly()
-                return
-            }
-
-            closeVpnInterfaceOnly()
-            vpnInterface = newPfd
-            AppLogger.i(TAG, "System-wide VPN TUN interface established successfully!")
-
-            startPacketForwardingLoop(newPfd)
+            vpnInterface = builder.establish()
+            AppLogger.i(TAG, "VPN TUN interface established successfully for system-wide network drop")
         } catch (e: Exception) {
-            AppLogger.e(TAG, "Error building/establishing VPN interface", e)
-            closeVpnInterfaceOnly()
+            AppLogger.e(TAG, "Error establishing VPN TUN interface", e)
+            closeVpnTunnel()
         }
     }
 
-    private fun startPacketForwardingLoop(pfd: ParcelFileDescriptor) {
-        forwardingJob?.cancel()
-        forwardingJob = serviceScope.launch(Dispatchers.IO) {
-            val buffer = ByteArray(32768)
-            val inputStream = FileInputStream(pfd.fileDescriptor)
-            try {
-                while (isActive && isRunningState.get() && vpnInterface != null) {
-                    val read = try {
-                        inputStream.read(buffer)
-                    } catch (e: Exception) {
-                        -1
-                    }
-                    if (read <= 0) {
-                        delay(20)
-                    }
-                    // All read packets from system applications are drained and blackholed (dropped)
-                }
-            } catch (e: CancellationException) {
-                AppLogger.d(TAG, "Packet forwarding loop cancelled")
-            } catch (e: Exception) {
-                AppLogger.d(TAG, "Packet forwarding loop ended: ${e.message}")
-            }
-        }
-    }
-
-    private fun closeVpnInterfaceOnly() {
+    private fun closeVpnTunnel() {
         try {
             vpnInterface?.close()
+        } catch (e: IOException) {
+            AppLogger.e(TAG, "Error closing VPN interface", e)
+        } finally {
             vpnInterface = null
-        } catch (e: Exception) {
-            AppLogger.d(TAG, "Note closing VPN descriptor: ${e.message}")
         }
     }
 
     private fun stopVpnSession() {
-        isRunningState.set(false)
-        isDropActiveState.set(false)
-
-        forwardingJob?.cancel()
-        forwardingJob = null
-
-        closeVpnInterfaceOnly()
-
+        closeVpnTunnel()
+        _isDropActiveFlow.value = false
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
-        AppLogger.i(TAG, "VPN Session stopped successfully and network restored")
+        AppLogger.i(TAG, "ThrottlerVpnService stopped successfully")
+    }
+
+    private fun startForegroundVpnNotification() {
+        try {
+            val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("TurnAway Network Regulation")
+                .setContentText("System-wide network regulation service running.")
+                .setSmallIcon(android.R.drawable.ic_menu_compass)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .build()
+
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error starting foreground notification for VPN service", e)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "Network Regulation Service",
+                NotificationManager.IMPORTANCE_LOW
+            )
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.createNotificationChannel(channel)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
+        closeVpnTunnel()
         instance = null
-        stopVpnSession()
-        serviceScope.cancel()
+        AppLogger.i(TAG, "ThrottlerVpnService destroyed")
     }
 }

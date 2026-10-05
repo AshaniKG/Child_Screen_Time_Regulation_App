@@ -24,6 +24,9 @@ import com.example.turnaway.engine.TouchDelayQueueManager
 import com.example.turnaway.util.AppLogger
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.firstOrNull
+import android.provider.Settings
+import android.net.Uri
+import android.content.Intent
 
 class SoftLandingAccessibilityService : AccessibilityService() {
 
@@ -266,6 +269,18 @@ class SoftLandingAccessibilityService : AccessibilityService() {
 
     private var currentForegroundPackage: String? = null
     private var targetedPackages: Set<String> = emptySet()
+    private var blockedPackages: Set<String> = emptySet()
+
+    private fun checkAndEnforceUpfrontAppBlock(pkg: String) {
+        if (!com.example.turnaway.engine.SessionStateManager.isSessionActive(applicationContext)) return
+        if (isPackageExcluded(pkg)) return
+
+        if (blockedPackages.contains(pkg)) {
+            AppLogger.w(TAG, "Upfront Blocked App launch intercepted ($pkg) during active session. Ejecting immediately to Home.")
+            performGlobalAction(GLOBAL_ACTION_HOME)
+            enforceAppLockoutIfRestricted(pkg)
+        }
+    }
 
     private fun evaluateAppTargeting() {
         val pkg = currentForegroundPackage ?: return
@@ -320,6 +335,10 @@ class SoftLandingAccessibilityService : AccessibilityService() {
         return false
     }
 
+    private var pendingForceStopPackage: String? = null
+    private var lastEnforcedPackage: String? = null
+    private var lastEnforcedTimestamp: Long = 0L
+
     private fun enforceAppLockoutIfRestricted(pkg: String) {
         if (isPackageExcluded(pkg)) return
 
@@ -328,33 +347,102 @@ class SoftLandingAccessibilityService : AccessibilityService() {
             return
         }
 
-        AppLogger.w(TAG, "Restricted app launch intercepted in LOCKED_OUT state: $pkg. Closing app completely via BACK & process kill.")
-
-        // 1. Perform BACK action to finish activity stack and close the app
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        // 2. Kill background processes for target package
-        try {
-            val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-            am?.killBackgroundProcesses(pkg)
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error killing background process for $pkg", e)
+        val now = System.currentTimeMillis()
+        if (pkg == lastEnforcedPackage && (now - lastEnforcedTimestamp) < 800L) {
+            return
         }
+        lastEnforcedPackage = pkg
+        lastEnforcedTimestamp = now
 
-        // 3. Safeguard: if app remains in foreground, send BACK & HOME fallback
-        serviceScope.launch {
-            delay(150)
-            if (currentForegroundPackage == pkg && targetedPackages.contains(pkg)) {
+        AppLogger.w(TAG, "Restricted app launch intercepted: $pkg. Completely closing selected app via multi-BACK finish, process termination & Settings Force-Stop.")
+
+        pendingForceStopPackage = pkg
+
+        // 1. Immediate multi-BACK action burst to finish active Activity stack (completely destroys app activities)
+        serviceScope.launch(Dispatchers.Main) {
+            for (i in 1..6) {
                 performGlobalAction(GLOBAL_ACTION_BACK)
-                delay(100)
-                if (currentForegroundPackage == pkg && targetedPackages.contains(pkg)) {
+                delay(30)
+            }
+            
+            // 2. Kill background processes for target package
+            try {
+                val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                am?.killBackgroundProcesses(pkg)
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error killing background process for $pkg", e)
+            }
+
+            delay(100)
+
+            // 3. Safeguard: if app remains in foreground, launch Settings App Details to Force Stop cleanly
+            if (currentForegroundPackage == pkg) {
+                try {
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                        data = Uri.parse("package:$pkg")
+                        addFlags(
+                            Intent.FLAG_ACTIVITY_NEW_TASK or 
+                            Intent.FLAG_ACTIVITY_NO_HISTORY or 
+                            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                        )
+                    }
+                    startActivity(intent)
+                } catch (e: Exception) {
+                    AppLogger.e(TAG, "Failed to launch Settings App Details for force stop", e)
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
-                try {
-                    val am = getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
-                    am?.killBackgroundProcesses(pkg)
-                } catch (e: Exception) {}
+            } else {
+                performGlobalAction(GLOBAL_ACTION_HOME)
             }
+        }
+    }
+
+    private fun attemptAutomatedForceStopInSettings(pkg: String) {
+        val rootNode = rootInActiveWindow ?: return
+        try {
+            // Find "Force stop" button in system Settings screen
+            val forceStopNodes = rootNode.findAccessibilityNodeInfosByText("Force stop")
+                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("FORCE STOP") }
+                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Stop") }
+                .ifEmpty { rootNode.findAccessibilityNodeInfosByViewId("com.android.settings:id/force_stop_button") }
+
+            var clicked = false
+            for (node in forceStopNodes) {
+                if (node.isEnabled) {
+                    node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    clicked = true
+                    AppLogger.i(TAG, "Automated Force-Stop clicked in Settings for package: $pkg")
+                    break
+                }
+            }
+
+            // Also handle confirmation dialog ("OK" or "Force stop")
+            val confirmNodes = rootNode.findAccessibilityNodeInfosByText("OK")
+                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Ok") }
+                .ifEmpty { rootNode.findAccessibilityNodeInfosByText("Force stop") }
+
+            for (confirmNode in confirmNodes) {
+                if (confirmNode.isClickable || confirmNode.parent?.isClickable == true) {
+                    val target = if (confirmNode.isClickable) confirmNode else confirmNode.parent
+                    target?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)
+                    AppLogger.i(TAG, "Automated Force-Stop confirmation clicked for package: $pkg")
+                    pendingForceStopPackage = null
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    break
+                }
+            }
+
+            if (clicked) {
+                serviceScope.launch {
+                    delay(200)
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                    pendingForceStopPackage = null
+                }
+            }
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error in automated force stop node clicking", e)
+        } finally {
+            rootNode.recycle()
         }
     }
 
@@ -393,7 +481,13 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     dao.getTargetedApps().collect { apps ->
                         targetedPackages = apps.filter { it.isTargeted }.map { it.packageName }.toSet()
                         AppLogger.i(TAG, "Synced ${targetedPackages.size} targeted apps: $targetedPackages")
-                        com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext).setTargetPackageNames(targetedPackages)
+                    }
+                }
+
+                launch {
+                    dao.getBlockedApps().collect { apps ->
+                        blockedPackages = apps.filter { it.isBlocked }.map { it.packageName }.toSet()
+                        AppLogger.i(TAG, "Synced ${blockedPackages.size} upfront blocked apps: $blockedPackages")
                     }
                 }
 
@@ -452,6 +546,15 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                     TAG,
                     "Started two-stage session. Total Usage: ${totalUsageMinutes}m, Transition: ${transitionMinutes}m, Normal Phase: ${normalUsageMs / 60000}m"
                 )
+
+                // Immediate t=0 check for upfront blocked apps currently in foreground
+                currentForegroundPackage?.let { fgPkg ->
+                    if (blockedPackages.contains(fgPkg) && !isPackageExcluded(fgPkg)) {
+                        AppLogger.w(TAG, "Blocked app ($fgPkg) in foreground at session start t=0! Ejecting immediately.")
+                        performGlobalAction(GLOBAL_ACTION_HOME)
+                        enforceAppLockoutIfRestricted(fgPkg)
+                    }
+                }
 
                 var wasTransitionInitialized = false
                 desaturationController.resetAll()
@@ -522,6 +625,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext)
                                 .onTransitionProgress(transitionElapsedMs, transitionMs)
                         }
+
+
 
                         // 1. Grayscale & Overlay Veil (with automatic visual overlay fallback if WRITE_SECURE_SETTINGS missing)
                         val isGrayscaleActive = activeProfile.enableColorDesaturation &&
@@ -607,10 +712,8 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                         )
                     } else {
                         // ─── STAGE 3: COMPLETED LOCKOUT (PERSISTENT UNTIL STOP) ───
-                        // Auto-stop network throttling at 100% transition end
                         com.example.turnaway.engine.ThrottleSessionManager.getInstance(applicationContext)
                             .onTransitionProgress(transitionMs, transitionMs)
-
                         val isGrayscaleActive = activeProfile.enableColorDesaturation
                         val shouldEnableOverlay = activeProfile.enableOverlayGraying || (isGrayscaleActive && !desaturationController.hasWriteSecureSettingsPermission())
 
@@ -630,8 +733,6 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             updateOverlayTouchableState(true)
                         }
 
-                        val isThrottled = false
-
                         val progressData = com.example.turnaway.engine.SessionProgress(
                             state = com.example.turnaway.engine.SessionState.COMPLETED_LOCKED,
                             config = com.example.turnaway.engine.SessionConfig(totalUsageMinutes, transitionMinutes),
@@ -642,7 +743,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                             currentSaturation = 0.0f,
                             currentTouchDelayMs = if (activeProfile.enableTouchDelay) activeProfile.maxTouchDelayMs else 0L,
                             currentVolumePercent = 0.0f,
-                            isNetworkThrottled = isThrottled
+                            isNetworkThrottled = false
                         )
                         com.example.turnaway.engine.SessionStateManager.updateProgress(progressData)
 
@@ -658,7 +759,7 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                                 currentSaturation = 0.0f,
                                 currentTouchDelayMs = if (activeProfile.enableTouchDelay) activeProfile.maxTouchDelayMs else 0L,
                                 currentVolumePercent = 0.0f,
-                                isNetworkThrottled = isThrottled,
+                                isNetworkThrottled = false,
                                 activeProfile = activeProfile
                             )
                         )
@@ -789,8 +890,16 @@ class SoftLandingAccessibilityService : AccessibilityService() {
                 }
             }
 
-            // Check if app closure / re-launch lockout is active in LOCKED_OUT state
+            // Handle automated Force-Stop if in Settings
+            if (pkg == "com.android.settings" && pendingForceStopPackage != null) {
+                attemptAutomatedForceStopInSettings(pendingForceStopPackage!!)
+            }
+
+            // Check if upfront app block or lockout is active
             if (!pkg.isNullOrBlank()) {
+                if (com.example.turnaway.engine.SessionStateManager.isSessionActive(applicationContext)) {
+                    checkAndEnforceUpfrontAppBlock(pkg)
+                }
                 val currentEngineState = EngineBridge.engineStatus.value.state
                 if (currentEngineState == EngineState.LOCKED_OUT) {
                     enforceAppLockoutIfRestricted(pkg)

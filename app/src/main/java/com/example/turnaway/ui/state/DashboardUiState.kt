@@ -1,5 +1,6 @@
 package com.example.turnaway.ui.state
 
+import com.example.turnaway.data.entity.BlockedAppEntity
 import com.example.turnaway.data.entity.RestrictionProfileEntity
 import com.example.turnaway.data.entity.ScheduleConfigEntity
 import com.example.turnaway.data.entity.SessionLogEntity
@@ -12,6 +13,7 @@ data class DashboardUiState(
     val activeProfile: RestrictionProfileEntity = RestrictionProfileEntity(profileName = "Standard"),
     val activeSchedules: List<ScheduleConfigEntity> = emptyList(),
     val targetApps: List<TargetAppEntity> = emptyList(),
+    val blockedApps: List<BlockedAppEntity> = emptyList(),
     val currentEngineState: EngineState = EngineState.MONITORING,
     val currentSessionState: SessionState = SessionState.IDLE,
     val totalUsageMinutes: Int = 30,
