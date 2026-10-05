@@ -1,0 +1,44 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="100dp"
+    android:height="100dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+    <!-- Rounded Background Container -->
+    <path
+        android:fillColor="#0F172A"
+        android:pathData="M28,0 L72,0 C87.46,0 100,12.54 100,28 L100,72 C100,87.46 87.46,100 72,100 L28,100 C12.54,100 0,87.46 0,72 L0,28 C0,12.54 12.54,0 28,0 Z" />
+    
+    <!-- Outer Shield Outline -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="4.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M50,18 C62,26 74,27 78,28 C78,48 71,67 50,82 C29,67 22,48 22,28 C26,27 38,26 50,18 Z" />
+    
+    <!-- Sand Clock / Hourglass Top Triangle -->
+    <path
+        android:fillColor="#38BDF8"
+        android:fillAlpha="0.25"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round"
+        android:pathData="M37,36 L63,36 L50,49 Z" />
+    
+    <!-- Sand Clock / Hourglass Bottom Triangle -->
+    <path
+        android:fillColor="#38BDF8"
+        android:fillAlpha="0.85"
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="3.5"
+        android:strokeLineJoin="round"
+        android:pathData="M37,62 L63,62 L50,49 Z" />
+    
+    <!-- Sand Grains / Focal Dots -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,47 C51.1,47 52,47.9 52,49 C52,50.1 51.1,51 50,51 C48.9,51 48,50.1 48,49 C48,47.9 48.9,47 50,47 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50,53.5 C50.83,53.5 51.5,54.17 51.5,55 C51.5,55.83 50.83,56.5 50,56.5 C49.17,56.5 48.5,55.83 48.5,55 C48.5,54.17 49.17,53.5 50,53.5 Z" />
+</vector>

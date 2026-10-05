@@ -57,6 +57,12 @@ interface SoftLandingDao {
     @Query("UPDATE target_apps SET isTargeted = :isTargeted")
     suspend fun updateAllTargetStatus(isTargeted: Boolean)
 
+    @Query("UPDATE target_apps SET isBlocked = :isBlocked WHERE packageName = :packageName")
+    suspend fun updateBlockedStatus(packageName: String, isBlocked: Boolean)
+
+    @Query("UPDATE target_apps SET isBlocked = :isBlocked")
+    suspend fun updateAllBlockedStatus(isBlocked: Boolean)
+
     @Query("DELETE FROM target_apps WHERE packageName = :packageName")
     suspend fun deleteTargetApp(packageName: String)
 }

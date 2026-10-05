@@ -1,0 +1,384 @@
+<!DOCTYPE html><html class="h-full" lang="en" style="width: 390px; height: 1016px; overflow: hidden; position: relative;"><head><meta charset="utf-8"><meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"><meta content="mobile_stack" name="shell-type"><link href="https://fonts.googleapis.com" rel="preconnect"><link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"><link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:ital,wght@0,400;0,600;1,400;1,600&amp;family=Manrope:wght@600;700&amp;display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"><style>@layer base{html,body{width:100%;min-height:100%;margin:0;padding:0;}body{overscroll-behavior-y:none;-webkit-tap-highlight-color:transparent;}.pb-safe{padding-bottom:env(safe-area-inset-bottom,0px);}.pt-safe{padding-top:env(safe-area-inset-top,0px);}main>:first-child{margin-top:0!important;}main>:last-child{margin-bottom:0!important;}}::-webkit-scrollbar{display:none;}</style><script src="https://cdn.tailwindcss.com"></script><script id="tailwind-config">tailwind.config = { darkMode: "class", theme: { extend: { "colors": { "surface-variant": "#dde2f1", "on-primary-container": "#8691b7", "on-tertiary-fixed": "#001f27", "inverse-surface": "#2b313c", "on-secondary-container": "#1a6e6c", "secondary-container": "#a2edea", "inverse-primary": "#bac5ee", "on-secondary": "#ffffff", "on-tertiary-fixed-variant": "#184d5a", "on-primary": "#ffffff", "surface-container-lowest": "#ffffff", "outline-variant": "#c6c6cf", "tertiary-fixed-dim": "#9dcede", "on-secondary-fixed-variant": "#00504e", "surface-container-high": "#e3e8f7", "on-tertiary-container": "#6a9aa8", "surface-container": "#e8eefd", "surface-container-low": "#f0f3ff", "on-secondary-fixed": "#00201f", "inverse-on-surface": "#ecf1ff", "primary-fixed": "#dae2ff", "on-primary-fixed-variant": "#3a4667", "secondary-fixed": "#a5f0ed", "tertiary-container": "#00303a", "on-surface-variant": "#45464e", "error": "#ba1a1a", "surface-container-highest": "#dde2f1", "outline": "#76777f", "primary-container": "#1e2a4a", "on-tertiary": "#ffffff", "surface-dim": "#d4dae9", "on-primary-fixed": "#0d1a39", "surface-bright": "#f9f9ff", "tertiary": "#001a20", "surface-tint": "#525d80", "background": "#f9f9ff", "primary-fixed-dim": "#bac5ee", "on-error-container": "#93000a", "secondary": "#126967", "primary": "#081534", "secondary-fixed-dim": "#89d3d1", "on-background": "#161c26", "surface": "#f9f9ff", "on-error": "#ffffff", "error-container": "#ffdad6", "tertiary-fixed": "#b9eafa", "on-surface": "#161c26" }, "borderRadius": { "DEFAULT": "1rem", "lg": "2rem", "xl": "3rem", "full": "9999px" }, "spacing": { "space-xl": "2.5rem", "space-sm": "0.5rem", "margin": "1.25rem", "space-xs": "0.25rem", "margin-desktop": "3rem", "space-lg": "1.5rem", "space-md": "1rem", "gutter-desktop": "1.5rem", "margin-tablet": "2rem", "gutter": "1rem" }, "fontFamily": { "label-md": ["Hanken Grotesk"], "headline-lg": ["Manrope"], "headline-lg-mobile": ["Manrope"], "display-lg": ["Manrope"], "label-lg": ["Hanken Grotesk"], "label-sm": ["Hanken Grotesk"], "display-lg-mobile": ["Manrope"], "headline-md": ["Manrope"], "headline-sm": ["Manrope"], "body-lg": ["Hanken Grotesk"], "body-sm": ["Hanken Grotesk"], "body-md": ["Hanken Grotesk"] }, "fontSize": { "label-md": ["12px", {"lineHeight": "16px", "letterSpacing": "0.02em", "fontWeight": "600"}], "headline-lg": ["32px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "600"}], "headline-lg-mobile": ["26px", {"lineHeight": "34px", "letterSpacing": "-0.015em", "fontWeight": "600"}], "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.03em", "fontWeight": "700"}], "label-lg": ["14px", {"lineHeight": "20px", "letterSpacing": "0.01em", "fontWeight": "600"}], "label-sm": ["11px", {"lineHeight": "14px", "letterSpacing": "0.04em", "fontWeight": "600"}], "display-lg-mobile": ["36px", {"lineHeight": "44px", "letterSpacing": "-0.025em", "fontWeight": "700"}], "headline-md": ["22px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}], "headline-sm": ["18px", {"lineHeight": "24px", "letterSpacing": "-0.005em", "fontWeight": "600"}], "body-lg": ["17px", {"lineHeight": "26px", "letterSpacing": "-0.01em", "fontWeight": "400"}], "body-sm": ["13px", {"lineHeight": "18px", "letterSpacing": "0.005em", "fontWeight": "400"}], "body-md": ["15px", {"lineHeight": "22px", "letterSpacing": "0em", "fontWeight": "400"}] } } } }</script><style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head><body class="bg-surface font-body-md text-on-surface min-h-screen flex flex-col antialiased selection:bg-secondary-container selection:text-on-secondary-container"><header class="fixed top-0 inset-x-0 z-50 bg-surface/85 backdrop-blur-xl shadow-[0_1px_8px_rgba(30,42,74,0.04)] pt-safe"><div class="h-16 px-space-md flex items-center justify-between"><div class="flex items-center gap-space-sm"><button aria-label="Go Back" class="w-11 h-11 -ml-1 rounded-full flex items-center justify-center text-on-surface hover:bg-surface-container transition-colors active:scale-95" onclick="history.back()"><span class="material-symbols-outlined text-[24px]">arrow_back</span></button><img alt="TurnAway Brand Logo" class="h-7 w-7 rounded-lg object-contain shadow-sm" src="https://lh3.googleusercontent.com/aida/AEtjO1Xdm6fuJiQN32StZd7hT4EPFyYuG6I5HnERCIi79C_ADqevlXUVFS7pDXRgBvX6ZOMnPgeLrVHQkXO_6VGqw0OYjhfk5B4nP9q5KPkKtH3UhLrr_-rVQ0I2BbbNY5WnxbRQCvjtqoTcsbvHDpYIU0QzBdiQ6L-htfCP6ooO6ocCTs1hMJ1l_3c0DgWKdB-iPp1XTqPFzKUY2G15o0z1Xx9dsIOhPQvjFj6jf6Fw468tHLDEoMF6kzKT_RLq"><h1 class="font-headline-sm text-headline-sm text-primary tracking-tight truncate max-w-[180px]">App Limit Details</h1></div></div></header><main class="flex-1 flex flex-col relative w-full pt-16 pb-safe bg-surface"><div class="flex flex-col w-full px-margin pb-28 pt-2">
+<!-- Status & Context Pill Header -->
+<div class="flex items-center justify-between py-space-xs mb-space-sm">
+<div class="flex items-center gap-space-xs">
+<span class="w-2.5 h-2.5 rounded-full bg-secondary animate-pulse"></span>
+
+</div>
+<div class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container font-label-sm text-label-sm flex items-center gap-1 shadow-sm transition-all duration-300" id="active-badge">
+<span class="material-symbols-outlined text-[14px]">tune</span>
+<span id="badge-count-text" class="">1 of 65 Active</span>
+</div>
+</div>
+<!-- Educational Help Banner -->
+<div class="p-space-md rounded-2xl bg-surface-container-low shadow-sm mb-space-md flex items-start gap-space-sm">
+<div class="w-9 h-9 rounded-xl bg-primary-container text-on-primary-container flex items-center justify-center shrink-0">
+<span class="material-symbols-outlined text-[20px]">hourglass_top</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="font-headline-sm text-headline-sm text-primary leading-tight">Bedtime App Limits</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 leading-snug">Only selected apps will experience bedtime slowdown and restrictions. Essential system apps, phone calls, and TurnAway remain smooth and accessible.</p>
+</div>
+</div>
+<!-- Search & Search Input Bar -->
+<div class="relative w-full mb-space-sm">
+<span class="material-symbols-outlined absolute left-3.5 top-1/2 -translate-y-1/2 text-outline text-[20px]">search</span>
+<input class="w-full h-12 pl-11 pr-10 rounded-2xl bg-surface-container-lowest font-body-md text-body-md text-on-surface placeholder:text-outline shadow-sm focus:outline-none focus:bg-surface-container transition-all" id="app-search-input" placeholder="Search 65 installed apps..." type="text">
+<button class="hidden absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-surface-variant text-on-surface-variant flex items-center justify-center text-[16px]" id="clear-search-btn">
+<span class="material-symbols-outlined text-[14px]">close</span>
+</button>
+</div>
+<!-- Filter Category Chips & Bulk Actions -->
+<div class="flex flex-col gap-2 mb-space-md">
+<!-- Category Chips Carousel -->
+<div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+<button class="category-chip active px-3.5 py-1.5 rounded-full bg-primary text-on-primary font-label-md text-label-md transition-all whitespace-nowrap shadow-sm" data-category="all">
+        All (65)
+      </button>
+<button class="category-chip px-3.5 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md transition-all whitespace-nowrap" data-category="social">
+        Social
+      </button>
+<button class="category-chip px-3.5 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md transition-all whitespace-nowrap" data-category="games">
+        Games
+      </button>
+<button class="category-chip px-3.5 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md transition-all whitespace-nowrap" data-category="productivity">
+        Productivity
+      </button>
+<button class="category-chip px-3.5 py-1.5 rounded-full bg-surface-container text-on-surface-variant font-label-md text-label-md transition-all whitespace-nowrap" data-category="entertainment">
+        Entertainment
+      </button>
+</div>
+<!-- Bulk Select / Deselect actions -->
+<div class="flex items-center justify-between pt-1">
+<span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider" id="list-counter-label">Showing 6 apps</span>
+<div class="flex items-center gap-2">
+<button class="px-2.5 py-1 rounded-lg bg-surface-container-high text-primary hover:bg-surface-variant font-label-sm text-label-sm transition-colors active:scale-95" id="bulk-select-all">
+          Select All
+        </button>
+<button class="px-2.5 py-1 rounded-lg bg-surface-container-high text-on-surface-variant hover:bg-surface-variant font-label-sm text-label-sm transition-colors active:scale-95" id="bulk-deselect-all">
+          Deselect All
+        </button>
+</div>
+</div>
+</div>
+<!-- Interactive App Rows List -->
+<div class="flex flex-col gap-2.5" id="apps-container">
+<!-- Item 1: TikTok (Active) -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="tiktok" data-category="social">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">music_note</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">TikTok</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Social</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">com.zhiliaoapp.musically</div>
+</div>
+</div>
+<!-- Custom M3 Switch Toggle -->
+<button aria-checked="true" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-primary p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="tiktok" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-primary translate-x-[20px] transition-transform duration-200 shadow-md flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-[18px] select-none">check</span>
+</div>
+</button>
+</div>
+<!-- Item 2: Instagram (Inactive) -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="instagram" data-category="social">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">photo_camera</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">Instagram</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Social</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">com.instagram.android</div>
+</div>
+</div>
+<button aria-checked="false" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-surface-variant p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="instagram" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-surface-variant translate-x-0 transition-transform duration-200 shadow-md flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-[16px] select-none">close</span>
+</div>
+</button>
+</div>
+<!-- Item 3: ASMR Makeup: Beauty Salon -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="asmr-makeup" data-category="games">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">face</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">ASMR Makeup: Salon</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Games</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">com.makeup.asmr.beautysalon</div>
+</div>
+</div>
+<button aria-checked="false" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-surface-variant p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="asmr-makeup" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-surface-variant translate-x-0 transition-transform duration-200 shadow-md flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-[16px] select-none">close</span>
+</div>
+</button>
+</div>
+<!-- Item 4: Brain Puzzle 2 -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="brain-puzzle" data-category="games">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">psychology</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">Brain Puzzle 2</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Games</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">com.brainlogic.puzzles.two</div>
+</div>
+</div>
+<button aria-checked="false" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-surface-variant p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="brain-puzzle" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-surface-variant translate-x-0 transition-transform duration-200 shadow-md flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-[16px] select-none">close</span>
+</div>
+</button>
+</div>
+<!-- Item 5: BookSnap -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="booksnap" data-category="productivity">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">auto_stories</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">BookSnap</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Productivity</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">app.booksnap.reader</div>
+</div>
+</div>
+<button aria-checked="false" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-surface-variant p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="booksnap" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-surface-variant translate-x-0 transition-transform duration-200 shadow-md flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-[16px] select-none">close</span>
+</div>
+</button>
+</div>
+<!-- Item 6: Adobe Acrobat Reader -->
+<div class="app-row p-3.5 rounded-2xl bg-surface-container-lowest shadow-sm flex items-center justify-between transition-transform duration-200 active:scale-[0.99]" data-app-id="adobe-acrobat" data-category="productivity">
+<div class="flex items-center gap-3 min-w-0 flex-1">
+<div class="w-11 h-11 rounded-xl bg-surface-container text-on-surface flex items-center justify-center shrink-0 border border-outline-variant/30">
+<span class="material-symbols-outlined text-[22px]">picture_as_pdf</span>
+</div>
+<div class="min-w-0 flex-1 pr-2">
+<div class="flex items-center gap-2">
+<h2 class="font-headline-sm text-headline-sm text-on-surface truncate">Adobe Acrobat Reader</h2>
+<span class="px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant font-label-sm text-label-sm shrink-0">Productivity</span>
+</div>
+<div class="font-body-sm text-body-sm text-outline truncate mt-0.5">com.adobe.reader</div>
+</div>
+</div>
+<button aria-checked="false" class="switch-toggle relative w-[52px] h-[32px] rounded-full bg-surface-variant p-0.5 transition-colors duration-200 shrink-0" data-toggle-btn="adobe-acrobat" role="switch">
+<div class="toggle-knob w-[28px] h-[28px] rounded-full bg-on-surface-variant translate-x-0 transition-transform duration-200 shadow-md flex items-center justify-center text-white">
+<span class="material-symbols-outlined text-[16px] select-none">close</span>
+</div>
+</button>
+</div>
+</div>
+<!-- Empty Results Fallback State -->
+<div class="hidden flex-col items-center justify-center py-10 px-4 text-center" id="empty-state">
+<div class="w-16 h-16 rounded-full bg-surface-container-high flex items-center justify-center text-outline mb-3">
+<span class="material-symbols-outlined text-[32px]">filter_list_off</span>
+</div>
+<div class="font-headline-sm text-headline-sm text-primary mb-1">No matching apps found</div>
+<p class="font-body-sm text-body-sm text-on-surface-variant max-w-[260px]">
+      Try adjusting your search query or reset category filter.
+    </p>
+</div>
+<!-- Sticky Bottom Summary Bar -->
+<div class="fixed bottom-0 inset-x-0 z-40 bg-surface/90 backdrop-blur-xl px-margin py-3.5 pb-safe shadow-[0_-4px_24px_rgba(8,21,52,0.06)] flex flex-col gap-2">
+
+<button class="w-full h-13 py-3 rounded-full bg-primary text-on-primary font-headline-sm text-headline-sm flex items-center justify-center gap-2 shadow-lg active:scale-[0.98] transition-all" id="apply-changes-btn">
+<span class="material-symbols-outlined text-[20px]">save</span>
+<span class="">Apply Changes</span>
+</button>
+</div>
+</div>
+<script>
+  (() => {
+    const apps = [
+      { id: 'tiktok', name: 'TikTok', pkg: 'com.zhiliaoapp.musically', cat: 'social', checked: true },
+      { id: 'instagram', name: 'Instagram', pkg: 'com.instagram.android', cat: 'social', checked: false },
+      { id: 'asmr-makeup', name: 'ASMR Makeup: Beauty Salon', pkg: 'com.makeup.asmr.beautysalon', cat: 'games', checked: false },
+      { id: 'brain-puzzle', name: 'Brain Puzzle 2', pkg: 'com.brainlogic.puzzles.two', cat: 'games', checked: false },
+      { id: 'booksnap', name: 'BookSnap', pkg: 'app.booksnap.reader', cat: 'productivity', checked: false },
+      { id: 'adobe-acrobat', name: 'Adobe Acrobat Reader', pkg: 'com.adobe.reader', cat: 'productivity', checked: false }
+    ];
+
+    let currentFilter = 'all';
+    let searchQuery = '';
+
+    const badgeCountText = document.getElementById('badge-count-text');
+    const summaryText = document.getElementById('selection-summary-text');
+    const counterLabel = document.getElementById('list-counter-label');
+    const searchInput = document.getElementById('app-search-input');
+    const clearBtn = document.getElementById('clear-search-btn');
+    const emptyState = document.getElementById('empty-state');
+    const appRows = document.querySelectorAll('.app-row');
+    const filterChips = document.querySelectorAll('.category-chip');
+    const selectAllBtn = document.getElementById('bulk-select-all');
+    const deselectAllBtn = document.getElementById('bulk-deselect-all');
+    const applyBtn = document.getElementById('apply-changes-btn');
+
+    function updateMetrics() {
+      const activeCount = apps.filter(a => a.checked).length;
+      badgeCountText.textContent = `${activeCount} of 65 Active`;
+      summaryText.textContent = `${activeCount} ${activeCount === 1 ? 'app' : 'apps'} selected for wind-down throttling`;
+    }
+
+    function renderToggles() {
+      apps.forEach(app => {
+        const toggleBtn = document.querySelector(`[data-toggle-btn="${app.id}"]`);
+        if (!toggleBtn) return;
+        const knob = toggleBtn.querySelector('.toggle-knob');
+        const icon = knob.querySelector('.material-symbols-outlined');
+
+        if (app.checked) {
+          toggleBtn.setAttribute('aria-checked', 'true');
+          toggleBtn.classList.remove('bg-surface-variant');
+          toggleBtn.classList.add('bg-primary');
+
+          knob.classList.remove('translate-x-0', 'bg-on-surface-variant', 'text-white');
+          knob.classList.add('translate-x-[20px]', 'bg-on-primary', 'text-primary');
+          icon.textContent = 'check';
+        } else {
+          toggleBtn.setAttribute('aria-checked', 'false');
+          toggleBtn.classList.remove('bg-primary');
+          toggleBtn.classList.add('bg-surface-variant');
+
+          knob.classList.remove('translate-x-[20px]', 'bg-on-primary', 'text-primary');
+          knob.classList.add('translate-x-0', 'bg-on-surface-variant', 'text-white');
+          icon.textContent = 'close';
+        }
+      });
+      updateMetrics();
+    }
+
+    function filterList() {
+      let visibleCount = 0;
+      appRows.forEach(row => {
+        const appId = row.getAttribute('data-app-id');
+        const app = apps.find(a => a.id === appId);
+        const matchesCategory = currentFilter === 'all' || app.cat === currentFilter;
+        const matchesSearch = app.name.toLowerCase().includes(searchQuery) || app.pkg.toLowerCase().includes(searchQuery);
+
+        if (matchesCategory && matchesSearch) {
+          row.classList.remove('hidden');
+          visibleCount++;
+        } else {
+          row.classList.add('hidden');
+        }
+      });
+
+      counterLabel.textContent = `Showing ${visibleCount} of ${apps.length} apps`;
+      if (visibleCount === 0) {
+        emptyState.classList.remove('hidden');
+        emptyState.classList.add('flex');
+      } else {
+        emptyState.classList.add('hidden');
+        emptyState.classList.remove('flex');
+      }
+    }
+
+    // Toggle click interactions
+    document.querySelectorAll('.switch-toggle').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.getAttribute('data-toggle-btn');
+        const app = apps.find(a => a.id === id);
+        if (app) {
+          app.checked = !app.checked;
+          renderToggles();
+        }
+      });
+    });
+
+    // Category filter interactions
+    filterChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        filterChips.forEach(c => {
+          c.classList.remove('bg-primary', 'text-on-primary', 'active', 'shadow-sm');
+          c.classList.add('bg-surface-container', 'text-on-surface-variant');
+        });
+        chip.classList.add('bg-primary', 'text-on-primary', 'active', 'shadow-sm');
+        chip.classList.remove('bg-surface-container', 'text-on-surface-variant');
+
+        currentFilter = chip.getAttribute('data-category');
+        filterList();
+      });
+    });
+
+    // Search input interactions
+    searchInput.addEventListener('input', (e) => {
+      searchQuery = e.target.value.toLowerCase().trim();
+      clearBtn.classList.toggle('hidden', searchQuery.length === 0);
+      filterList();
+    });
+
+    clearBtn.addEventListener('click', () => {
+      searchInput.value = '';
+      searchQuery = '';
+      clearBtn.classList.add('hidden');
+      filterList();
+      searchInput.focus();
+    });
+
+    // Bulk buttons
+    selectAllBtn.addEventListener('click', () => {
+      apps.forEach(a => {
+        if (currentFilter === 'all' || a.cat === currentFilter) {
+          a.checked = true;
+        }
+      });
+      renderToggles();
+    });
+
+    deselectAllBtn.addEventListener('click', () => {
+      apps.forEach(a => {
+        if (currentFilter === 'all' || a.cat === currentFilter) {
+          a.checked = false;
+        }
+      });
+      renderToggles();
+    });
+
+    // Apply button feedback
+    applyBtn.addEventListener('click', () => {
+      const originalHTML = applyBtn.innerHTML;
+      applyBtn.innerHTML = `
+        <span class="material-symbols-outlined text-[20px] animate-spin">refresh</span>
+        <span>Updating Rules...</span>
+      `;
+      setTimeout(() => {
+        applyBtn.innerHTML = `
+          <span class="material-symbols-outlined text-[20px]">check_circle</span>
+          <span>Applied Successfully</span>
+        `;
+        applyBtn.classList.add('bg-secondary');
+        setTimeout(() => {
+          applyBtn.innerHTML = originalHTML;
+          applyBtn.classList.remove('bg-secondary');
+        }, 1600);
+      }, 700);
+    });
+
+    // Initial render
+    renderToggles();
+    filterList();
+  })();
+</script></main><div class="fixed bottom-0 inset-x-0 pointer-events-none pb-2 pt-1 flex justify-center"><div class="w-28 h-1 rounded-full bg-outline/25"></div></div></body></html>

@@ -154,7 +154,8 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
 
                 val targetEntities = discoveredMap.map { (pkg, name) ->
                     val isTargeted = if (isLegacyAllTargeted) false else (currentMap[pkg]?.isTargeted ?: false)
-                    TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted)
+                    val isBlocked = currentMap[pkg]?.isBlocked ?: false
+                    TargetAppEntity(packageName = pkg, appName = name, isTargeted = isTargeted, isBlocked = isBlocked)
                 }.sortedBy { it.appName.lowercase() }
 
                 if (targetEntities.isNotEmpty()) {
@@ -178,6 +179,20 @@ class DashboardViewModel(private val repository: SoftLandingRepository) : ViewMo
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateAllTargetStatus(isTargeted)
             AppLogger.i("TargetApps", "Updated all apps target status: $isTargeted")
+        }
+    }
+
+    fun toggleAppBlocked(packageName: String, isBlocked: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAppBlockedStatus(packageName, isBlocked)
+            AppLogger.i("TargetApps", "Updated blocked status: $packageName -> $isBlocked")
+        }
+    }
+
+    fun setAllAppsBlocked(isBlocked: Boolean) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateAllBlockedStatus(isBlocked)
+            AppLogger.i("TargetApps", "Updated all apps blocked status: $isBlocked")
         }
     }
 
